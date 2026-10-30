@@ -1,0 +1,54 @@
+import dayjs from 'dayjs'
+import type { Role } from '../types/models.ts'
+
+export function formatINR(amount: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+export function formatDate(value: string): string {
+  return dayjs(value).format('DD-MM-YYYY')
+}
+
+export function formatDateTime(value: string): string {
+  return dayjs(value).format('DD-MM-YYYY HH:mm')
+}
+
+export function formatMonth(month: string): string {
+  return dayjs(`${month}-01`).format('MMMM YYYY')
+}
+
+export function formatRole(role: Role): string {
+  if (role === 'admin') return 'Admin'
+  if (role === 'owner') return 'Owner'
+  return 'Tenant'
+}
+
+export function initials(name: string): string {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('')
+}
+
+export function firstName(name: string): string {
+  return name.split(' ')[0] ?? name
+}
+
+export function formatPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length !== 10) return phone
+  return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`
+}
+
+export function greeting(now = new Date()): string {
+  const hour = now.getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
