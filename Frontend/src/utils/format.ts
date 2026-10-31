@@ -46,6 +46,13 @@ export function formatPhone(phone: string): string {
   return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`
 }
 
+/** "Sai Pradeepika Residency" → title "Sai Pradeepika", subtitle "Residency". */
+export function splitBuildingName(name: string): { title: string; subtitle: string } {
+  const words = name.trim().split(/\s+/)
+  if (words.length < 2) return { title: name, subtitle: '' }
+  return { title: words.slice(0, -1).join(' '), subtitle: words[words.length - 1] ?? '' }
+}
+
 export function greeting(now = new Date()): string {
   const hour = now.getHours()
   if (hour < 12) return 'Good morning'

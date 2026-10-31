@@ -18,14 +18,19 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import loginBuilding from '../../assets/login-building.jpg'
 import { BrandMark } from '../../components/brand/BrandMark.tsx'
 import { useAuth } from '../../hooks/useAuth.tsx'
-import { apartment } from '../../mocks/apartment.ts'
+import { useBuilding } from '../../hooks/useBuilding.tsx'
+import { mockRoles } from '../../mocks/roles.ts'
 import { mockUsers } from '../../mocks/users.ts'
 import { paths } from '../../routes/nav.ts'
-import { formatRole } from '../../utils/format.ts'
 import { useState } from 'react'
+
+function seededRoleName(roleId: string): string {
+  return mockRoles.find((role) => role.id === roleId)?.name ?? 'User'
+}
 
 export function LoginPage() {
   const { user, login } = useAuth()
+  const { building } = useBuilding()
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
 
@@ -40,9 +45,9 @@ export function LoginPage() {
   if (user) return <Navigate to={paths.dashboard} replace />
 
   const signIn = (email: string, password: string) => {
-    const ok = login(email, password)
-    if (!ok) {
-      setError('Those details do not match a demo account.')
+    const failure = login(email, password)
+    if (failure) {
+      setError(failure)
       return
     }
     setError(null)
@@ -73,17 +78,17 @@ export function LoginPage() {
             <BrandMark light size={64} />
             <div>
               <Title order={1} c="sand.0" fz={{ base: 34, md: 52 }} lh={1.05}>
-                {apartment.name}
+                {building.name}
               </Title>
               <Group gap={8} mt="sm" wrap="nowrap">
                 <IconMapPin size={22} color="#F4EFE8" />
                 <Text c="sand.1" size="lg">
-                  {apartment.place}
+                  {building.address}
                 </Text>
               </Group>
             </div>
             <Stack gap={6} visibleFrom="md">
-              <Text c="sand.1">Eight flats. One shared maintenance book.</Text>
+              <Text c="sand.1">{building.totalFlats} flats. One shared maintenance book.</Text>
               <Text c="sand.2" size="sm">
                 Expenses are split equally. Bills stay inside the building.
               </Text>
@@ -111,7 +116,7 @@ export function LoginPage() {
               ) : null}
               <TextInput
                 label="Email"
-                placeholder="name@saipradeepika.in"
+                placeholder="name@flat.com"
                 autoComplete="username"
                 {...form.getInputProps('email')}
               />
@@ -122,12 +127,12 @@ export function LoginPage() {
                 {...form.getInputProps('password')}
               />
               <Button type="submit" size="lg" fullWidth>
-                Sign in
+                Login
               </Button>
             </Stack>
           </form>
 
-          <Divider my="xl" label="Demo accounts" labelPosition="center" />
+          <Divider my="xl" label="Demo accounts · development only" labelPosition="center" />
           <Stack gap="sm">
             {mockUsers.map((account) => (
               <Button
@@ -139,10 +144,10 @@ export function LoginPage() {
               >
                 <Group justify="space-between" wrap="nowrap" w="100%">
                   <Text size="sm" fw={600}>
-                    {formatRole(account.role)} · {account.name.split(' ')[0]}
+                    {seededRoleName(account.roleId)} · {account.name}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    {account.password}
+                    {account.email} · {account.password}
                   </Text>
                 </Group>
               </Button>

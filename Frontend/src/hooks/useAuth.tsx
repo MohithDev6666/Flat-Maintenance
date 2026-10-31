@@ -1,106 +1,61 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
-import { mockUsers } from '../mocks/users.ts'
-import type { MockUser, SessionUser } from '../types/models.ts'
+import type { SessionUser } from '../types/models.ts'
+import { resolveSession } from '../utils/session.ts'
+import { useBuilding } from './useBuilding.tsx'
 
 const SESSION_KEY = 'spr.session'
 
 interface AuthContextValue {
   user: SessionUser | null
-  accounts: MockUser[]
-  login: (email: string, password: string) => boolean
+  login: (email: string, password: string) => string | null
   logout: () => void
-  saveAccount: (account: MockUser, isNew: boolean) => string | null
-  relinkFlat: (previousNumber: string, nextNumber: string) => void
-}
-
-function toSession(account: MockUser): SessionUser {
-  return {
-    id: account.id,
-    name: account.name,
-    email: account.email,
-    role: account.role,
-    flatNumber: account.flatNumber,
-    phone: account.phone,
-  }
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function readSession(): SessionUser | null {
+function readSessionId(): string | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as SessionUser
-    const account = mockUsers.find((item) => item.id === parsed.id && item.role === parsed.role)
-    if (!account) return null
-    const previousNames = ['Anil Sharma', 'Ravi Kumar', 'Meera Iyer']
-    const name = previousNames.includes(parsed.name) ? account.name : parsed.name
-    return { ...parsed, name }
+    return sessionStorage.getItem(SESSION_KEY)
   } catch {
     return null
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<SessionUser | null>(() => readSession())
-  const [accounts, setAccounts] = useState<MockUser[]>(mockUsers)
+  const { accounts, roles, owners, tenants, flats } = useBuilding()
+  const [userId, setUserId] = useState<string | null>(() => readSessionId())
+
+  const account = accounts.find((item) => item.id === userId)
+  const user = account ? resolveSession(account, roles, owners, tenants, flats) : null
 
   const login = (email: string, password: string) => {
     const found = accounts.find(
-      (account) => account.email.toLowerCase() === email.trim().toLowerCase() && account.password === password,
+      (item) => item.email.toLowerCase() === email.trim().toLowerCase() && item.password === password,
     )
-    if (!found) return false
-    const session = toSession(found)
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
-    setUser(session)
-    return true
-  }
-
-  const logout = () => {
-    sessionStorage.removeItem(SESSION_KEY)
-    setUser(null)
-  }
-
-  const saveAccount = (account: MockUser, isNew: boolean) => {
-    const emailTaken = accounts.some(
-      (item) => item.email.toLowerCase() === account.email.trim().toLowerCase() && item.id !== account.id,
-    )
-    if (!account.name.trim() || !account.email.trim()) return 'Name and email are required.'
-    if (emailTaken) return 'That email is already used.'
-    if (isNew && !account.password.trim()) return 'Set a password for the new user.'
-    const previous = accounts.find((item) => item.id === account.id)
-    const saved: MockUser = {
-      ...account,
-      name: account.name.trim(),
-      email: account.email.trim().toLowerCase(),
-      phone: account.phone.trim(),
-      password: account.password.trim() || previous?.password || '',
-      flatNumber: account.role === 'admin' ? null : account.flatNumber,
+    if (!found) return 'Those details do not match a demo account.'
+    if (found.status !== 'Active') return 'This account is deactivated. Ask the admin to activate it.'
+    if (!resolveSession(found, roles, owners, tenants, flats)) {
+      return 'This account’s role is inactive or it is not linked to a flat. Ask the admin to fix it.'
     }
-    setAccounts((current) => (isNew ? [...current, saved] : current.map((item) => (item.id === saved.id ? saved : item))))
-    if (user?.id === saved.id) {
-      const session = toSession(saved)
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
-      setUser(session)
+    try {
+      sessionStorage.setItem(SESSION_KEY, found.id)
+    } catch {
+      // Session storage can be unavailable; the in-memory session still works.
     }
+    setUserId(found.id)
     return null
   }
 
-  const relinkFlat = (previousNumber: string, nextNumber: string) => {
-    if (!previousNumber || previousNumber === nextNumber) return
-    setAccounts((current) =>
-      current.map((item) => (item.flatNumber === previousNumber ? { ...item, flatNumber: nextNumber } : item)),
-    )
-    if (user?.flatNumber === previousNumber) {
-      const session = { ...user, flatNumber: nextNumber }
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(session))
-      setUser(session)
+  const logout = () => {
+    try {
+      sessionStorage.removeItem(SESSION_KEY)
+    } catch {
+      // Nothing stored to clear.
     }
+    setUserId(null)
   }
 
-  return (
-    <AuthContext.Provider value={{ user, accounts, login, logout, saveAccount, relinkFlat }}>{children}</AuthContext.Provider>
-  )
+  return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth(): AuthContextValue {

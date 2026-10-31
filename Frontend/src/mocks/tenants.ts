@@ -1,0 +1,68 @@
+import type { Tenant } from '../types/models.ts'
+
+/**
+ * Tenants of 101, 201, and 302 live there now. 202's tenant moved out, so 202 is vacant.
+ * A tenant's owner is the owner of their flat.
+ */
+export const mockTenants: Tenant[] = [
+  {
+    id: 'tenant-101',
+    name: 'Anjali Verma',
+    phone: '9848044444',
+    email: 'tenant101@flat.com',
+    flatId: 'flat-101',
+    occupants: 2,
+    moveIn: '2026-08-01',
+    moveOut: null,
+    agreementEnd: '2027-07-31',
+    idProofType: 'Aadhaar',
+    idProof: { name: 'anjali-aadhaar.jpg', url: null, kind: 'image' },
+    emergency: 'Mohan Verma · 9848044455',
+    vehicle: 'TS 07 CK 8812',
+  },
+  {
+    id: 'tenant-201',
+    name: 'Pooja Shah',
+    phone: '9848033333',
+    email: 'tenant201@flat.com',
+    flatId: 'flat-201',
+    occupants: 3,
+    moveIn: '2026-06-01',
+    moveOut: null,
+    agreementEnd: '2027-05-31',
+    idProofType: 'Aadhaar',
+    idProof: { name: 'pooja-aadhaar.pdf', url: null, kind: 'pdf' },
+    emergency: 'Rekha Shah · 9848033344',
+    vehicle: 'TS 09 AB 2145',
+  },
+  {
+    id: 'tenant-202-past',
+    name: 'Naresh Gupta',
+    phone: '9848055555',
+    email: 'naresh.gupta@example.in',
+    flatId: 'flat-202',
+    occupants: 4,
+    moveIn: '2025-04-01',
+    moveOut: '2026-08-31',
+    agreementEnd: '2026-08-31',
+    idProofType: 'PAN',
+    idProof: { name: 'naresh-pan.jpg', url: null, kind: 'image' },
+    emergency: 'Sunita Gupta · 9848055566',
+    vehicle: '',
+  },
+  {
+    id: 'tenant-302',
+    name: 'Ravi Teja',
+    phone: '9848066666',
+    email: 'ravi.teja@example.in',
+    flatId: 'flat-302',
+    occupants: 4,
+    moveIn: '2025-11-01',
+    moveOut: null,
+    agreementEnd: '2027-10-31',
+    idProofType: 'Driving licence',
+    idProof: { name: 'ravi-dl.jpg', url: null, kind: 'image' },
+    emergency: 'Sravani Teja · 9848066677',
+    vehicle: 'TS 08 EF 4410',
+  },
+]

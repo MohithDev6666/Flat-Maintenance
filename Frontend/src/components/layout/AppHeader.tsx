@@ -3,7 +3,7 @@ import { IconLogout } from '@tabler/icons-react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth.tsx'
 import { crumbsFor, paths } from '../../routes/nav.ts'
-import { formatRole, initials } from '../../utils/format.ts'
+import { initials } from '../../utils/format.ts'
 
 export function AppHeader({ opened, onToggle }: { opened: boolean; onToggle: () => void }) {
   const { pathname } = useLocation()
@@ -51,7 +51,8 @@ export function AppHeader({ opened, onToggle }: { opened: boolean; onToggle: () 
                     {user.name}
                   </Text>
                   <Text size="xs" c="dimmed" visibleFrom="sm">
-                    {formatRole(user.role)}
+                    {user.roleName}
+                    {user.flatNumber ? ` · Flat ${user.flatNumber}` : ''}
                   </Text>
                 </div>
               </Group>
@@ -60,10 +61,10 @@ export function AppHeader({ opened, onToggle }: { opened: boolean; onToggle: () 
           <Menu.Dropdown>
             <Menu.Label>
               {user.email}
-              {user.flatNumber ? ` · Flat ${user.flatNumber}` : ''}
+              {user.flatNumber ? ` · Flat ${user.flatNumber}, floor ${user.floor}` : ' · Not linked to a flat'}
             </Menu.Label>
             <Menu.Item leftSection={<IconLogout size={16} />} onClick={signOut}>
-              Sign out
+              Logout
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>

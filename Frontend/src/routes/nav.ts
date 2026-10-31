@@ -1,21 +1,24 @@
 import {
+  IconBuildingCommunity,
   IconBuilding,
   IconChartBar,
   IconHistory,
   IconHome,
+  IconKey,
   IconLayoutDashboard,
   IconLock,
   IconPlus,
   IconReceipt,
-  IconRepeat,
   IconTags,
   IconUpload,
   IconUser,
+  IconUserShield,
   IconUsers,
   IconWallet,
 } from '@tabler/icons-react'
 import type { ComponentType } from 'react'
-import type { Role } from '../types/models.ts'
+import type { PermissionAction, PermissionModule, SessionUser } from '../types/models.ts'
+import { can, canOpenAdminModule } from '../utils/permissions.ts'
 
 export const paths = {
   login: '/login',
@@ -27,11 +30,13 @@ export const paths = {
   summary: '/summary',
   residents: '/residents',
   admin: '/admin',
-  adminUsers: '/admin/users',
+  adminBuilding: '/admin/building',
   adminFlats: '/admin/flats',
+  adminOwners: '/admin/owners',
   adminTenants: '/admin/tenants',
+  adminRoles: '/admin/roles',
+  adminUsers: '/admin/users',
   adminCategories: '/admin/categories',
-  adminRecurring: '/admin/recurring',
   adminRecent: '/admin/recent',
   adminLock: '/admin/lock',
 } as const
@@ -39,32 +44,41 @@ export const paths = {
 export interface NavItem {
   label: string
   path: string
-  roles: Role[]
+  module: PermissionModule
+  action: PermissionAction
   icon: ComponentType<{ size?: number }>
 }
 
+/** Common modules, in the order the sidebar shows them. */
 export const navItems: NavItem[] = [
-  { label: 'Dashboard', path: paths.dashboard, roles: ['admin', 'owner', 'tenant'], icon: IconLayoutDashboard },
-  { label: 'Expenses', path: paths.expenses, roles: ['admin', 'owner', 'tenant'], icon: IconReceipt },
-  { label: 'Add expense', path: paths.addExpense, roles: ['admin', 'owner', 'tenant'], icon: IconPlus },
-  { label: 'Pay', path: paths.pay, roles: ['admin', 'owner', 'tenant'], icon: IconUpload },
-  { label: 'My contribution', path: paths.contribution, roles: ['admin', 'owner', 'tenant'], icon: IconWallet },
-  { label: 'Month summary', path: paths.summary, roles: ['admin', 'owner', 'tenant'], icon: IconChartBar },
-  { label: 'Flats', path: paths.residents, roles: ['admin', 'owner', 'tenant'], icon: IconBuilding },
+  { label: 'Dashboard', path: paths.dashboard, module: 'dashboard', action: 'view', icon: IconLayoutDashboard },
+  { label: 'Expenses', path: paths.expenses, module: 'expenses', action: 'view', icon: IconReceipt },
+  { label: 'Add Expense', path: paths.addExpense, module: 'expenses', action: 'add', icon: IconPlus },
+  { label: 'Pay / Upload', path: paths.pay, module: 'payments', action: 'view', icon: IconUpload },
+  { label: 'My Contribution', path: paths.contribution, module: 'contribution', action: 'view', icon: IconWallet },
+  { label: 'Month Summary', path: paths.summary, module: 'summary', action: 'view', icon: IconChartBar },
+  { label: 'Flats', path: paths.residents, module: 'flats', action: 'view', icon: IconBuilding },
 ]
 
+/** Admin modules, in the order the sidebar shows them. */
 export const adminNav: NavItem[] = [
-  { label: 'Users', path: paths.adminUsers, roles: ['admin'], icon: IconUsers },
-  { label: 'Flats', path: paths.adminFlats, roles: ['admin'], icon: IconHome },
-  { label: 'Tenants', path: paths.adminTenants, roles: ['admin'], icon: IconUser },
-  { label: 'Categories', path: paths.adminCategories, roles: ['admin'], icon: IconTags },
-  { label: 'Recurring expenses', path: paths.adminRecurring, roles: ['admin'], icon: IconRepeat },
-  { label: 'Recent changes', path: paths.adminRecent, roles: ['admin'], icon: IconHistory },
-  { label: 'Lock month', path: paths.adminLock, roles: ['admin'], icon: IconLock },
+  { label: 'Building Information', path: paths.adminBuilding, module: 'building', action: 'view', icon: IconBuildingCommunity },
+  { label: 'Flats', path: paths.adminFlats, module: 'flatManagement', action: 'view', icon: IconHome },
+  { label: 'Owners', path: paths.adminOwners, module: 'owners', action: 'view', icon: IconKey },
+  { label: 'Tenants', path: paths.adminTenants, module: 'tenants', action: 'view', icon: IconUser },
+  { label: 'Roles', path: paths.adminRoles, module: 'roles', action: 'view', icon: IconUserShield },
+  { label: 'Users', path: paths.adminUsers, module: 'users', action: 'view', icon: IconUsers },
+  { label: 'Categories', path: paths.adminCategories, module: 'categories', action: 'view', icon: IconTags },
+  { label: 'Recent Changes', path: paths.adminRecent, module: 'recentChanges', action: 'view', icon: IconHistory },
+  { label: 'Lock Month', path: paths.adminLock, module: 'lockMonth', action: 'view', icon: IconLock },
 ]
 
-export function navFor(role: Role): NavItem[] {
-  return navItems.filter((item) => item.roles.includes(role))
+export function navFor(user: SessionUser): NavItem[] {
+  return navItems.filter((item) => can(user, item.module, item.action))
+}
+
+export function adminNavFor(user: SessionUser): NavItem[] {
+  return adminNav.filter((item) => canOpenAdminModule(user, item.module))
 }
 
 export interface Crumb {
@@ -76,21 +90,21 @@ export function crumbsFor(pathname: string): Crumb[] {
   if (pathname === paths.pay) {
     return [
       { label: 'Dashboard', to: paths.dashboard },
-      { label: 'Pay' },
+      { label: 'Pay / Upload' },
     ]
   }
   if (pathname === paths.addExpense) {
     return [
       { label: 'Dashboard', to: paths.dashboard },
       { label: 'Expenses', to: paths.expenses },
-      { label: 'Add expense' },
+      { label: 'Add Expense' },
     ]
   }
   const adminMatch = adminNav.find((item) => item.path === pathname)
   if (adminMatch) {
     return [
       { label: 'Dashboard', to: paths.dashboard },
-      { label: 'Admin', to: paths.adminUsers },
+      { label: 'Admin', to: paths.adminBuilding },
       { label: adminMatch.label },
     ]
   }

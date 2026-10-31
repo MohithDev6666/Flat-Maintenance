@@ -13,11 +13,11 @@ export default function App() {
       <DatesProvider settings={{ firstDayOfWeek: 1, consistentWeeks: true }}>
         <Notifications position="top-center" />
         <BrowserRouter>
-          <AuthProvider>
-            <BuildingProvider>
+          <BuildingProvider>
+            <AuthProvider>
               <AppRoutes />
-            </BuildingProvider>
-          </AuthProvider>
+            </AuthProvider>
+          </BuildingProvider>
         </BrowserRouter>
       </DatesProvider>
     </MantineProvider>

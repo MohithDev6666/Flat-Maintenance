@@ -17,7 +17,7 @@ export function ExpenseRow({ expense, onOpen }: { expense: Expense; onOpen: () =
           </Group>
           <Text size="xs" c="dimmed" mt={2}>
             {formatDate(expense.date)} · {expense.paidBy}
-            {expense.hasBill ? ' · Bill attached' : ''}
+            {expense.bill ? ' · Bill attached' : ''}
           </Text>
           <Text size="sm" mt={2} lineClamp={2}>
             {expense.description}
