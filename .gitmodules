@@ -1,0 +1,3 @@
+[submodule "Backend/rbac"]
+	path = Backend/rbac
+	url = https://github.com/TrideAdmin/rbac.git
