@@ -88,6 +88,7 @@ func SetUpProtectedRoutes(r *gin.RouterGroup, client *mongo.Client, Database str
 	flatManagementHandler := flatmanagementhandler.NewFlatManagementHandler(flatService)
 	flatmanagementroute.SetupFlatManagementRoutes(r.Group("/flat-management"), flatManagementHandler, require)
 
+	
 	buildingService := buildingservice.NewBuildingService(buildingRepo, auditRepo)
 	buildingHandler := buildinghandler.NewBuildingHandler(buildingService)
 	buildingroute.SetupBuildingRoutes(r.Group("/building"), buildingHandler, require)
