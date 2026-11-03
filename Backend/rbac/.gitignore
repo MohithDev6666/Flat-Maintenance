@@ -1,0 +1,27 @@
+# Executables and Binaries
+*.exe
+app/app.exe
+*.exe.manifest
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Build outputs
+*.out
+
+# Environment variables
+.env
+*.env
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+Thumbs.db
+.DS_Store
