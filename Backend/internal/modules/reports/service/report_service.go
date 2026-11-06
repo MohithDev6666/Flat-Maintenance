@@ -3,11 +3,21 @@ package service
 import (
 	"context"
 
-	"go.mongodb.org/mongo-driver/bson"
+	"github.com/trideadmin/flat-maintenance/backend/internal/models"
 )
 
+// Viewer is who asks for a report: an administrator, or a resident with their profile link
+// (nil when the resident is not linked to an owner or tenant record yet).
+type Viewer struct {
+	Admin bool
+	Link  *models.UserLink
+}
+
+// ReportService works out every money figure the screens show: shares, dues, credit, payments,
+// arrears, balances and Paid / Partial / Unpaid status. Residents only receive their own flat.
 type ReportService interface {
-	GetDashboard(ctx context.Context) (map[string][]bson.M, error)
-	GetSummary(ctx context.Context) (map[string][]bson.M, error)
-	GetContribution(ctx context.Context) (map[string][]bson.M, error)
+	GetDashboard(ctx context.Context, viewer Viewer) (*DashboardReport, error)
+	GetSummary(ctx context.Context, viewer Viewer, month string) (*SummaryReport, error)
+	GetContribution(ctx context.Context, viewer Viewer, month, partyKey string) (*ContributionReport, error)
+	GetPayStatus(ctx context.Context, viewer Viewer, month string) (*PayStatusReport, error)
 }

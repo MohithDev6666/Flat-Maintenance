@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/trideadmin/flat-maintenance/backend/internal/logs"
@@ -9,6 +10,7 @@ import (
 	"github.com/trideadmin/flat-maintenance/backend/internal/modules/expenses/service"
 	userLinkService "github.com/trideadmin/flat-maintenance/backend/internal/modules/userlinks/service"
 	"github.com/trideadmin/flat-maintenance/backend/internal/utils"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type ExpensesHandlerImpl struct {
@@ -28,6 +30,15 @@ func (eh *ExpensesHandlerImpl) GetAllExpensesHandler(c *gin.Context) {
 	if err != nil {
 		utils.RespondError(c, err)
 		return
+	}
+	// Expenses store a full YYYY-MM-DD date, so ?month=YYYY-MM matches the date prefix.
+	if month, ok := filter["month"].(string); ok {
+		delete(filter, "month")
+		if _, err := time.Parse("2006-01", month); err != nil {
+			utils.RespondError(c, utils.BadRequest("month must use YYYY-MM format"))
+			return
+		}
+		filter["date"] = bson.M{"$regex": "^" + month + "-"}
 	}
 	data, err := eh.expenseService.GetAllExpenses(c, filter, limit, offset)
 	if err != nil {

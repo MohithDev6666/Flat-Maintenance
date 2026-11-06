@@ -1,4 +1,4 @@
-import type { PermissionAction, PermissionModule, Role } from '../../types/models.ts'
+import type { PermissionAction, PermissionModule } from '../../types/models.ts'
 
 export const moduleLabels: Record<PermissionModule, string> = {
   dashboard: 'Dashboard',
@@ -24,10 +24,4 @@ export const actionLabels: Record<PermissionAction, string> = {
   edit: 'Edit',
   delete: 'Delete',
   manage: 'Manage',
-}
-
-export const kindLabels: Record<Role, string> = {
-  admin: 'Admin · not linked to a flat',
-  owner: 'Owner · linked to an owner record',
-  tenant: 'Tenant · linked to a tenant record',
 }

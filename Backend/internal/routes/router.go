@@ -21,12 +21,13 @@ func RegisterRoutes(router *gin.Engine, client *mongo.Client, Database string, s
 	}
 
 	middleware := ginrbac.New(service.Checker, service.Auth)
+	router.Use(CORS(allowedOrigins()))
 	api := router.Group("/api")
 
 	// 1. RBAC routes (public auth endpoints + authenticated RBAC management)
 	protected := SetUpRBACRoutes(api, service, middleware)
 
 	// 2. Protected application routes (JWT + RBAC permissions)
-	SetUpProtectedRoutes(protected, client, Database, middleware.Require)
+	SetUpProtectedRoutes(protected, client, Database, middleware.Require, middleware.RequireAny)
 	return nil
 }

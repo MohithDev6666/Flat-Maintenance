@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth.tsx'
 import { crumbsFor, paths } from '../../routes/nav.ts'
 import { initials } from '../../utils/format.ts'
+import { notifySuccess } from '../../utils/notify.ts'
 
 export function AppHeader({ opened, onToggle }: { opened: boolean; onToggle: () => void }) {
   const { pathname } = useLocation()
@@ -11,8 +12,9 @@ export function AppHeader({ opened, onToggle }: { opened: boolean; onToggle: () 
   const { user, logout } = useAuth()
   const crumbs = crumbsFor(pathname)
 
-  const signOut = () => {
-    logout()
+  const signOut = async () => {
+    await logout()
+    notifySuccess('Signed out', 'See you next time.')
     navigate(paths.login, { replace: true })
   }
 

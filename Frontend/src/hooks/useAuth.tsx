@@ -1,61 +1,58 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { UNAUTHORIZED_EVENT } from '../services/apiClient.ts'
+import * as authService from '../services/authService.ts'
 import type { SessionUser } from '../types/models.ts'
-import { resolveSession } from '../utils/session.ts'
-import { useBuilding } from './useBuilding.tsx'
 
-const SESSION_KEY = 'spr.session'
-
+/**
+ * Only the signed-in session lives here. Screens load their own data through the services,
+ * so there is no shared data store.
+ */
 interface AuthContextValue {
   user: SessionUser | null
-  login: (email: string, password: string) => string | null
-  logout: () => void
+  /** True while a stored token is being checked after a page load. */
+  restoring: boolean
+  login: (email: string, password: string) => Promise<void>
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function readSessionId(): string | null {
-  try {
-    return sessionStorage.getItem(SESSION_KEY)
-  } catch {
-    return null
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { accounts, roles, owners, tenants, flats } = useBuilding()
-  const [userId, setUserId] = useState<string | null>(() => readSessionId())
+  const [user, setUser] = useState<SessionUser | null>(null)
+  const [restoring, setRestoring] = useState(true)
 
-  const account = accounts.find((item) => item.id === userId)
-  const user = account ? resolveSession(account, roles, owners, tenants, flats) : null
-
-  const login = (email: string, password: string) => {
-    const found = accounts.find(
-      (item) => item.email.toLowerCase() === email.trim().toLowerCase() && item.password === password,
-    )
-    if (!found) return 'Those details do not match a demo account.'
-    if (found.status !== 'Active') return 'This account is deactivated. Ask the admin to activate it.'
-    if (!resolveSession(found, roles, owners, tenants, flats)) {
-      return 'This account’s role is inactive or it is not linked to a flat. Ask the admin to fix it.'
+  useEffect(() => {
+    let active = true
+    authService
+      .restoreSession()
+      .then((session) => {
+        if (active) setUser(session)
+      })
+      .catch(() => {
+        // An expired or unlinked session goes back to the login page.
+        if (active) setUser(null)
+      })
+      .finally(() => {
+        if (active) setRestoring(false)
+      })
+    const signOut = () => setUser(null)
+    window.addEventListener(UNAUTHORIZED_EVENT, signOut)
+    return () => {
+      active = false
+      window.removeEventListener(UNAUTHORIZED_EVENT, signOut)
     }
-    try {
-      sessionStorage.setItem(SESSION_KEY, found.id)
-    } catch {
-      // Session storage can be unavailable; the in-memory session still works.
-    }
-    setUserId(found.id)
-    return null
-  }
+  }, [])
 
-  const logout = () => {
-    try {
-      sessionStorage.removeItem(SESSION_KEY)
-    } catch {
-      // Nothing stored to clear.
-    }
-    setUserId(null)
-  }
+  const login = useCallback(async (email: string, password: string) => {
+    setUser(await authService.login(email, password))
+  }, [])
 
-  return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>
+  const logout = useCallback(async () => {
+    await authService.logout()
+    setUser(null)
+  }, [])
+
+  return <AuthContext.Provider value={{ user, restoring, login, logout }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth(): AuthContextValue {

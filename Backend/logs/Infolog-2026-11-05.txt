@@ -1,0 +1,15 @@
+INFO: 2026/11/05 14:56:45 main.go:35: Connected to MongoDB
+INFO: 2026/11/05 14:56:45 main.go:64: Flat Maintenance API listening on :8080
+INFO: 2026/11/05 15:05:24 main.go:74: Shutting down gracefully...
+INFO: 2026/11/05 15:05:24 main.go:85: Shutdown complete
+INFO: 2026/11/05 15:15:07 main.go:35: Connected to MongoDB
+INFO: 2026/11/05 15:15:07 main.go:64: Flat Maintenance API listening on :8080
+INFO: 2026/11/05 15:16:10 userlinks_service_impl.go:133: Profile linked for user: 6aec50620312e989ffe0d240 kind: owner
+INFO: 2026/11/05 15:37:47 main.go:74: Shutting down gracefully...
+INFO: 2026/11/05 15:37:47 main.go:85: Shutdown complete
+INFO: 2026/11/05 15:37:49 main.go:35: Connected to MongoDB
+INFO: 2026/11/05 15:37:50 main.go:64: Flat Maintenance API listening on :8080
+INFO: 2026/11/05 15:37:54 main.go:74: Shutting down gracefully...
+INFO: 2026/11/05 15:37:54 main.go:85: Shutdown complete
+INFO: 2026/11/05 15:38:03 main.go:35: Connected to MongoDB
+INFO: 2026/11/05 15:38:04 main.go:64: Flat Maintenance API listening on :8080

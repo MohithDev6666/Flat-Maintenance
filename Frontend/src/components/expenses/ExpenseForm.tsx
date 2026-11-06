@@ -1,8 +1,8 @@
 import { Alert, Button, Group, Input, NumberInput, SegmentedControl, Select, SimpleGrid, Stack, Textarea, TextInput } from '@mantine/core'
 import { DatePickerInput } from '@mantine/dates'
 import { useForm } from '@mantine/form'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import type { Attachment, PaymentMode, Responsibility } from '../../types/models.ts'
+import dayjs from 'dayjs'
+import type { Attachment, ExpenseCategory, PaymentMode, Responsibility } from '../../types/models.ts'
 import { monthOf } from '../../utils/calculations.ts'
 import { formatMonth } from '../../utils/format.ts'
 import { FileUploadField } from '../common/FileUploadField.tsx'
@@ -27,6 +27,10 @@ export function ExpenseForm({
   onSubmit,
   onCancel,
   compact = false,
+  saving = false,
+  categories,
+  isLocked,
+  flatCount,
 }: {
   initialValues: ExpenseFormValues
   paidByName: string
@@ -34,8 +38,12 @@ export function ExpenseForm({
   onSubmit: (values: ExpenseFormValues) => void
   onCancel?: () => void
   compact?: boolean
+  saving?: boolean
+  /** From the Categories master. Inactive ones are hidden unless the expense already uses one. */
+  categories: ExpenseCategory[]
+  isLocked: (month: string) => boolean
+  flatCount: number
 }) {
-  const { categories, isLocked, flats } = useBuilding()
   const form = useForm<ExpenseFormValues>({
     initialValues,
     validate: {
@@ -47,7 +55,7 @@ export function ExpenseForm({
     },
   })
 
-  const month = form.values.date ? monthOf(form.values.date) : null
+  const month = form.values.date ? monthOf(dayjs(form.values.date).format('YYYY-MM-DD')) : null
   const locked = month ? isLocked(month) : false
   const choices = categories
     .filter((item) => item.status === 'Active' || item.name === initialValues.category)
@@ -68,6 +76,7 @@ export function ExpenseForm({
           data={choices}
           allowDeselect={false}
           searchable
+          nothingFoundMessage="No active categories. The admin adds them on Admin → Categories."
           value={form.values.category}
           error={form.errors.category}
           onChange={(value) => {
@@ -90,9 +99,14 @@ export function ExpenseForm({
         <NumberInput
           label="Amount"
           required
-          description={`Rupees. Split equally across all ${flats.length} flats.`}
+          description={
+            flatCount > 0
+              ? `Rupees and paise. Split equally across all ${flatCount} flats, to the paisa.`
+              : 'Rupees and paise. Split equally across the flats, to the paisa.'
+          }
           prefix="₹ "
           min={0}
+          decimalScale={2}
           thousandSeparator=","
           {...form.getInputProps('amount')}
         />
@@ -117,11 +131,11 @@ export function ExpenseForm({
           onChange={(file) => form.setFieldValue('bill', file)}
         />
         <Group grow={!compact}>
-          <Button type="submit" size={compact ? 'sm' : 'lg'} fullWidth={!compact} disabled={locked}>
+          <Button type="submit" size={compact ? 'sm' : 'lg'} fullWidth={!compact} disabled={locked} loading={saving}>
             {submitLabel}
           </Button>
           {onCancel ? (
-            <Button variant="default" size={compact ? 'sm' : 'lg'} onClick={onCancel}>
+            <Button variant="default" size={compact ? 'sm' : 'lg'} onClick={onCancel} disabled={saving}>
               Cancel
             </Button>
           ) : null}

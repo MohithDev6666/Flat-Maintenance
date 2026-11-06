@@ -1,33 +1,71 @@
 import { Anchor, Button, Divider, Modal, Stack, Text, TextInput } from '@mantine/core'
 import { IconPlus, IconSearch } from '@tabler/icons-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { DetailLine } from '../../components/common/DetailLine.tsx'
 import { ConfirmDialog } from '../../components/common/ConfirmDialog.tsx'
 import { EmptyState } from '../../components/common/EmptyState.tsx'
+import { LoadState } from '../../components/common/LoadState.tsx'
 import { ResponsiveList, StackedCell } from '../../components/common/ResponsiveList.tsx'
 import { StatusBadge } from '../../components/common/StatusBadge.tsx'
 import { PageHeading } from '../../components/ui/PageHeading.tsx'
-import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
 import { usePermissions } from '../../hooks/usePermissions.ts'
 import { paths } from '../../routes/nav.ts'
-import type { Owner } from '../../types/models.ts'
+import { getErrorMessage } from '../../services/apiClient.ts'
+import { emptyBuilding, getBuilding } from '../../services/buildingService.ts'
+import { getFlats } from '../../services/flatService.ts'
+import { deleteOwner, getOwners } from '../../services/ownerService.ts'
+import { getTenants } from '../../services/tenantService.ts'
+import { getAccounts } from '../../services/userService.ts'
+import type { Building, Flat, Owner, Tenant, UserAccount } from '../../types/models.ts'
 import { activeTenantOf, flatStatus } from '../../utils/calculations.ts'
 import { formatPhone } from '../../utils/format.ts'
-import { notifyResult } from '../../utils/notify.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 import { OwnerForm } from './OwnerForm.tsx'
 
 export function OwnersPage() {
-  const { user } = useAuth()
-  const { owners, tenants, flats, accounts, deleteOwner } = useBuilding()
   const { can } = usePermissions()
+  const [owners, setOwners] = useState<Owner[]>([])
+  const [tenants, setTenants] = useState<Tenant[]>([])
+  const [flats, setFlats] = useState<Flat[]>([])
+  const [accounts, setAccounts] = useState<UserAccount[]>([])
+  const [building, setBuilding] = useState<Building>(emptyBuilding)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Owner | null>(null)
   const [viewing, setViewing] = useState<Owner | null>(null)
   const [deleting, setDeleting] = useState<Owner | null>(null)
-  if (!user) return null
+  const [busy, setBusy] = useState(false)
+  const canSeeUsers = can('users', 'view')
+  const canSeeBuilding = can('building', 'view')
+
+  const load = useCallback(async () => {
+    try {
+      const [ownerList, tenantList, flatList, accountList, buildingRecord] = await Promise.all([
+        getOwners(),
+        getTenants(),
+        getFlats(),
+        canSeeUsers ? getAccounts().catch(() => []) : Promise.resolve([]),
+        canSeeBuilding ? getBuilding().catch(() => emptyBuilding) : Promise.resolve(emptyBuilding),
+      ])
+      setOwners(ownerList)
+      setTenants(tenantList)
+      setFlats(flatList)
+      setAccounts(accountList)
+      setBuilding(buildingRecord)
+      setError(null)
+    } catch (failure) {
+      setError(getErrorMessage(failure))
+    } finally {
+      setLoading(false)
+    }
+  }, [canSeeUsers, canSeeBuilding])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const flatNumber = (flatId: string | null) => flats.find((flat) => flat.id === flatId)?.number ?? null
   const loginOf = (owner: Owner) => accounts.find((account) => account.ownerId === owner.id)?.email ?? 'No login yet'
@@ -51,10 +89,25 @@ export function OwnersPage() {
     setEditing(owner)
     setFormOpen(true)
   }
-  const remove = () => {
+  const remove = async () => {
     if (!deleting) return
-    notifyResult(deleteOwner(deleting.id, user.name), { title: 'Owner deleted', message: deleting.name }, 'Not deleted')
-    setDeleting(null)
+    const login = accounts.find((account) => account.ownerId === deleting.id)
+    if (login) {
+      notifyApiError(new Error(`${login.email} is linked to this owner. Change or remove that user first.`), 'Not deleted')
+      setDeleting(null)
+      return
+    }
+    setBusy(true)
+    try {
+      await deleteOwner(deleting.id)
+      notifySuccess('Owner deleted', deleting.name)
+      setDeleting(null)
+      await load()
+    } catch (failure) {
+      notifyApiError(failure, 'Not deleted')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const rows = visible.map((owner) => {
@@ -125,13 +178,23 @@ export function OwnersPage() {
         value={query}
         onChange={(event) => setQuery(event.currentTarget.value)}
       />
-      {rows.length === 0 ? (
-        <EmptyState title={owners.length === 0 ? 'No owners yet' : 'No owners match'} message="Add an owner and link them to a flat." />
-      ) : (
-        <ResponsiveList headers={['Owner', 'Phone', 'Flat', 'Occupancy', 'Tenant', 'Login']} rows={rows} />
-      )}
+      <LoadState loading={loading} error={error} onRetry={load}>
+        {rows.length === 0 ? (
+          <EmptyState title={owners.length === 0 ? 'No owners yet' : 'No owners match'} message="Add an owner and link them to a flat." />
+        ) : (
+          <ResponsiveList headers={['Owner', 'Phone', 'Flat', 'Occupancy', 'Tenant', 'Login']} rows={rows} />
+        )}
+      </LoadState>
 
-      <OwnerForm opened={formOpen} owner={editing} onClose={() => setFormOpen(false)} />
+      <OwnerForm
+        opened={formOpen}
+        owner={editing}
+        owners={owners}
+        flats={flats}
+        building={building}
+        onClose={() => setFormOpen(false)}
+        onSaved={() => void load()}
+      />
       <Modal opened={viewing !== null} onClose={() => setViewing(null)} title={viewing?.name ?? 'Owner'}>
         {viewing ? (
           <Stack gap={6}>
@@ -165,9 +228,10 @@ export function OwnersPage() {
       <ConfirmDialog
         opened={deleting !== null}
         title="Delete owner"
-        message={deleting ? `Delete ${deleting.name}? Their flat will have no owner until you add or link one.` : ''}
+        message={deleting ? `Delete ${deleting.name}? Owners with payments or a linked login cannot be deleted.` : ''}
         confirmLabel="Delete owner"
-        onConfirm={remove}
+        loading={busy}
+        onConfirm={() => void remove()}
         onClose={() => setDeleting(null)}
       />
     </Stack>

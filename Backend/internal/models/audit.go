@@ -16,6 +16,16 @@ type AuditEntry struct {
 	OldValue    string    `json:"oldValue" bson:"oldValue"`
 	NewValue    string    `json:"newValue" bson:"newValue"`
 	CreatedAt   time.Time `json:"createdAt,omitzero" bson:"createdAt"`
+	// Changes is the readable field-by-field difference, worked out when the entry is read; it is not stored.
+	Changes []AuditChange `json:"changes" bson:"-"`
+}
+
+// AuditChange is one field that differs between an audit entry's old and new values.
+type AuditChange struct {
+	Field string `json:"field"`
+	Label string `json:"label"`
+	Old   string `json:"old"`
+	New   string `json:"new"`
 }
 
 func NewAuditEntry() *AuditEntry {

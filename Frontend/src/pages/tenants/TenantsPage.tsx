@@ -1,20 +1,25 @@
 import { Button, Group, Modal, SegmentedControl, Stack, TextInput } from '@mantine/core'
 import { IconPlus, IconSearch } from '@tabler/icons-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ConfirmDialog } from '../../components/common/ConfirmDialog.tsx'
 import { DetailLine } from '../../components/common/DetailLine.tsx'
 import { EmptyState } from '../../components/common/EmptyState.tsx'
 import { FilePreview } from '../../components/common/FilePreview.tsx'
+import { LoadState } from '../../components/common/LoadState.tsx'
 import { ResponsiveList, StackedCell } from '../../components/common/ResponsiveList.tsx'
 import { StatusBadge } from '../../components/common/StatusBadge.tsx'
 import { PageHeading } from '../../components/ui/PageHeading.tsx'
 import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
 import { usePermissions } from '../../hooks/usePermissions.ts'
-import type { Attachment, Tenant } from '../../types/models.ts'
+import { getErrorMessage } from '../../services/apiClient.ts'
+import { getFlats } from '../../services/flatService.ts'
+import { getOwners } from '../../services/ownerService.ts'
+import { deleteTenant, getTenants } from '../../services/tenantService.ts'
+import { getAccounts } from '../../services/userService.ts'
+import type { Attachment, Flat, Owner, Tenant, UserAccount } from '../../types/models.ts'
 import { ownerOf, tenancyState } from '../../utils/calculations.ts'
 import { formatDate, formatPhone } from '../../utils/format.ts'
-import { notifyResult } from '../../utils/notify.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 import { canSeeIdProof } from '../../utils/permissions.ts'
 import { TenantForm } from './TenantForm.tsx'
 
@@ -22,15 +27,47 @@ type Filter = 'all' | 'Active' | 'Upcoming' | 'Past'
 
 export function TenantsPage() {
   const { user } = useAuth()
-  const { tenants, owners, flats, accounts, deleteTenant } = useBuilding()
   const { can } = usePermissions()
+  const [tenants, setTenants] = useState<Tenant[]>([])
+  const [owners, setOwners] = useState<Owner[]>([])
+  const [flats, setFlats] = useState<Flat[]>([])
+  const [accounts, setAccounts] = useState<UserAccount[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Tenant | null>(null)
   const [viewing, setViewing] = useState<Tenant | null>(null)
   const [deleting, setDeleting] = useState<Tenant | null>(null)
+  const [busy, setBusy] = useState(false)
   const [proof, setProof] = useState<Attachment | null>(null)
+  const canSeeUsers = can('users', 'view')
+
+  const load = useCallback(async () => {
+    try {
+      const [tenantList, ownerList, flatList, accountList] = await Promise.all([
+        getTenants(),
+        getOwners(),
+        getFlats(),
+        canSeeUsers ? getAccounts().catch(() => []) : Promise.resolve([]),
+      ])
+      setTenants(tenantList)
+      setOwners(ownerList)
+      setFlats(flatList)
+      setAccounts(accountList)
+      setError(null)
+    } catch (failure) {
+      setError(getErrorMessage(failure))
+    } finally {
+      setLoading(false)
+    }
+  }, [canSeeUsers])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
   if (!user) return null
 
   const flatNumber = (flatId: string | null) => flats.find((flat) => flat.id === flatId)?.number ?? null
@@ -56,10 +93,19 @@ export function TenantsPage() {
     setEditing(tenant)
     setFormOpen(true)
   }
-  const remove = () => {
+  const remove = async () => {
     if (!deleting) return
-    notifyResult(deleteTenant(deleting.id, user.name), { title: 'Tenant deleted', message: deleting.name }, 'Not deleted')
-    setDeleting(null)
+    setBusy(true)
+    try {
+      await deleteTenant(deleting.id)
+      notifySuccess('Tenant deleted', deleting.name)
+      setDeleting(null)
+      await load()
+    } catch (failure) {
+      notifyApiError(failure, 'Not deleted')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const rows = visible.map((tenant) => {
@@ -141,13 +187,23 @@ export function TenantsPage() {
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
       </Group>
-      {rows.length === 0 ? (
-        <EmptyState title={tenants.length === 0 ? 'No tenants yet' : 'No tenants match'} message="Add a tenant and link them to a flat." />
-      ) : (
-        <ResponsiveList headers={['Tenant', 'Flat', 'Owner', 'Stay', 'Status', 'Login']} rows={rows} />
-      )}
+      <LoadState loading={loading} error={error} onRetry={load}>
+        {rows.length === 0 ? (
+          <EmptyState title={tenants.length === 0 ? 'No tenants yet' : 'No tenants match'} message="Add a tenant and link them to a flat." />
+        ) : (
+          <ResponsiveList headers={['Tenant', 'Flat', 'Owner', 'Stay', 'Status', 'Login']} rows={rows} />
+        )}
+      </LoadState>
 
-      <TenantForm opened={formOpen} tenant={editing} onClose={() => setFormOpen(false)} />
+      <TenantForm
+        opened={formOpen}
+        tenant={editing}
+        tenants={tenants}
+        owners={owners}
+        flats={flats}
+        onClose={() => setFormOpen(false)}
+        onSaved={() => void load()}
+      />
       <Modal opened={viewing !== null} onClose={() => setViewing(null)} title={viewing?.name ?? 'Tenant'}>
         {viewing ? (
           <Stack gap={6}>
@@ -187,7 +243,8 @@ export function TenantsPage() {
             : ''
         }
         confirmLabel="Delete tenant"
-        onConfirm={remove}
+        loading={busy}
+        onConfirm={() => void remove()}
         onClose={() => setDeleting(null)}
       />
       <FilePreview file={proof} title="ID proof" note="Private to the admin and the owner of this flat." onClose={() => setProof(null)} />

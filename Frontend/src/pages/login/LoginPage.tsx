@@ -1,57 +1,44 @@
-import {
-  Alert,
-  Box,
-  Button,
-  Divider,
-  Flex,
-  Group,
-  PasswordInput,
-  SimpleGrid,
-  Stack,
-  Text,
-  TextInput,
-  Title,
-} from '@mantine/core'
+import { Alert, Box, Button, Flex, PasswordInput, SimpleGrid, Stack, Text, TextInput, Title } from '@mantine/core'
 import { useForm } from '@mantine/form'
-import { IconMapPin } from '@tabler/icons-react'
+import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import loginBuilding from '../../assets/login-building.jpg'
 import { BrandMark } from '../../components/brand/BrandMark.tsx'
 import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import { mockRoles } from '../../mocks/roles.ts'
-import { mockUsers } from '../../mocks/users.ts'
 import { paths } from '../../routes/nav.ts'
-import { useState } from 'react'
-
-function seededRoleName(roleId: string): string {
-  return mockRoles.find((role) => role.id === roleId)?.name ?? 'User'
-}
+import { getErrorMessage } from '../../services/apiClient.ts'
+import { notifySuccess } from '../../utils/notify.ts'
 
 export function LoginPage() {
   const { user, login } = useAuth()
-  const { building } = useBuilding()
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   const form = useForm({
     initialValues: { email: '', password: '' },
     validate: {
-      email: (value) => (/^\S+@\S+\.\S+$/.test(value) ? null : 'Enter a valid email'),
-      password: (value) => (value.trim() ? null : 'Enter the password'),
+      email: (value) => (/^\S+@\S+\.\S+$/.test(value.trim()) ? null : 'Enter a valid email'),
+      password: (value) => (value ? null : 'Enter the password'),
     },
   })
 
   if (user) return <Navigate to={paths.dashboard} replace />
 
-  const signIn = (email: string, password: string) => {
-    const failure = login(email, password)
-    if (failure) {
-      setError(failure)
-      return
-    }
+  const signIn = async (email: string, password: string) => {
+    setSubmitting(true)
     setError(null)
-    navigate(paths.dashboard, { replace: true })
+    try {
+      await login(email, password)
+      notifySuccess('Signed in', 'Welcome back.')
+      navigate(paths.dashboard, { replace: true })
+    } catch (failure) {
+      const message = getErrorMessage(failure)
+      // The API answers a wrong email or password with a generic "login failed".
+      setError(/login failed/i.test(message) ? 'The email or password is incorrect.' : message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -78,17 +65,13 @@ export function LoginPage() {
             <BrandMark light size={64} />
             <div>
               <Title order={1} c="sand.0" fz={{ base: 34, md: 52 }} lh={1.05}>
-                {building.name}
+                Flat Maintenance
               </Title>
-              <Group gap={8} mt="sm" wrap="nowrap">
-                <IconMapPin size={22} color="#F4EFE8" />
-                <Text c="sand.1" size="lg">
-                  {building.address}
-                </Text>
-              </Group>
+              <Text c="sand.1" size="lg" mt="sm">
+                One shared maintenance book for the building.
+              </Text>
             </div>
             <Stack gap={6} visibleFrom="md">
-              <Text c="sand.1">{building.totalFlats} flats. One shared maintenance book.</Text>
               <Text c="sand.2" size="sm">
                 Expenses are split equally. Bills stay inside the building.
               </Text>
@@ -101,58 +84,22 @@ export function LoginPage() {
         <Box w="100%" maw={440}>
           <Title order={2}>Sign in</Title>
           <Text c="dimmed" mt={4} mb="lg">
-            Static demo. Pick an account or type the email and password.
+            Use the email and password your building admin gave you.
           </Text>
-          <form
-            onSubmit={form.onSubmit((values) => {
-              signIn(values.email, values.password)
-            })}
-          >
+          <form onSubmit={form.onSubmit((values) => void signIn(values.email, values.password))}>
             <Stack gap="md">
               {error ? (
                 <Alert color="red" title="Could not sign in">
                   {error}
                 </Alert>
               ) : null}
-              <TextInput
-                label="Email"
-                placeholder="name@flat.com"
-                autoComplete="username"
-                {...form.getInputProps('email')}
-              />
-              <PasswordInput
-                label="Password"
-                placeholder="Password"
-                autoComplete="current-password"
-                {...form.getInputProps('password')}
-              />
-              <Button type="submit" size="lg" fullWidth>
+              <TextInput label="Email" placeholder="name@example.com" autoComplete="username" {...form.getInputProps('email')} />
+              <PasswordInput label="Password" placeholder="Password" autoComplete="current-password" {...form.getInputProps('password')} />
+              <Button type="submit" size="lg" fullWidth loading={submitting}>
                 Login
               </Button>
             </Stack>
           </form>
-
-          <Divider my="xl" label="Demo accounts · development only" labelPosition="center" />
-          <Stack gap="sm">
-            {mockUsers.map((account) => (
-              <Button
-                key={account.id}
-                variant="default"
-                size="lg"
-                fullWidth
-                onClick={() => signIn(account.email, account.password)}
-              >
-                <Group justify="space-between" wrap="nowrap" w="100%">
-                  <Text size="sm" fw={600}>
-                    {seededRoleName(account.roleId)} · {account.name}
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    {account.email} · {account.password}
-                  </Text>
-                </Group>
-              </Button>
-            ))}
-          </Stack>
         </Box>
       </Flex>
     </SimpleGrid>

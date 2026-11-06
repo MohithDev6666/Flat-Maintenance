@@ -1,35 +1,78 @@
 import { Button, Stack } from '@mantine/core'
 import dayjs from 'dayjs'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ConfirmDialog } from '../../components/common/ConfirmDialog.tsx'
+import { LoadState } from '../../components/common/LoadState.tsx'
 import { ResponsiveList } from '../../components/common/ResponsiveList.tsx'
 import { StatusBadge } from '../../components/common/StatusBadge.tsx'
 import { PageHeading } from '../../components/ui/PageHeading.tsx'
-import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
 import { usePermissions } from '../../hooks/usePermissions.ts'
+import { getErrorMessage } from '../../services/apiClient.ts'
+import { getExpenses } from '../../services/expenseService.ts'
+import { getMonthLocks, lockChecker, setMonthLock } from '../../services/monthLockService.ts'
+import { getPayments } from '../../services/paymentService.ts'
+import type { Expense, MonthLock, Payment } from '../../types/models.ts'
 import { listMonths } from '../../utils/calculations.ts'
 import { formatDateTime, formatMonth } from '../../utils/format.ts'
-import { notifySuccess } from '../../utils/notify.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 
 export function LockMonthPage() {
-  const { user } = useAuth()
-  const { expenses, payments, monthLocks, isLocked, setMonthLock } = useBuilding()
   const { can } = usePermissions()
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [payments, setPayments] = useState<Payment[]>([])
+  const [monthLocks, setMonthLocks] = useState<MonthLock[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<string | null>(null)
-  if (!user) return null
+  const [busy, setBusy] = useState(false)
+  const canSeeExpenses = can('expenses', 'view')
+  const canSeePayments = can('payments', 'view')
 
-  // Every month that has activity or a lock history.
+  const load = useCallback(async () => {
+    try {
+      const [lockList, expenseList, paymentList] = await Promise.all([
+        getMonthLocks(),
+        canSeeExpenses ? getExpenses() : Promise.resolve([]),
+        canSeePayments ? getPayments() : Promise.resolve([]),
+      ])
+      setMonthLocks(lockList)
+      setExpenses(expenseList)
+      setPayments(paymentList)
+      setError(null)
+    } catch (failure) {
+      setError(getErrorMessage(failure))
+    } finally {
+      setLoading(false)
+    }
+  }, [canSeeExpenses, canSeePayments])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const isLocked = lockChecker(monthLocks)
+
+  // Every month that has activity or a lock history, plus the current month.
   const months = [
     ...new Set([...listMonths(expenses), ...payments.map((payment) => payment.month), ...monthLocks.map((lock) => lock.month)]),
-  ].sort((left, right) => right.localeCompare(left))
+  ]
+    .filter(Boolean)
+    .sort((left, right) => right.localeCompare(left))
 
   const pendingLocked = pending ? isLocked(pending) : false
-  const confirm = () => {
+  const confirm = async () => {
     if (!pending) return
-    setMonthLock(pending, !pendingLocked, user.name)
-    notifySuccess(pendingLocked ? 'Month unlocked' : 'Month locked', formatMonth(pending))
-    setPending(null)
+    setBusy(true)
+    try {
+      await setMonthLock(pending, !pendingLocked)
+      notifySuccess(pendingLocked ? 'Month unlocked' : 'Month locked', formatMonth(pending))
+      setPending(null)
+      await load()
+    } catch (failure) {
+      notifyApiError(failure, pendingLocked ? 'Not unlocked' : 'Not locked')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const rows = months.map((month) => {
@@ -57,7 +100,7 @@ export function LockMonthPage() {
           { label: 'Unlocked', value: lock?.unlockedBy ? `${lock.unlockedBy} · ${unlockedOn}` : '—' },
         ],
       },
-      actions: can('lockMonth', 'manage') ? (
+      actions: can('lockMonth', 'edit') ? (
         <Button size="xs" variant={locked ? 'default' : 'light'} color={locked ? undefined : 'red'} onClick={() => setPending(month)}>
           {locked ? 'Unlock' : 'Lock'}
         </Button>
@@ -71,7 +114,9 @@ export function LockMonthPage() {
         title="Lock Month"
         description="Locking a month blocks new expenses, edits, deletes, and payments for it until you unlock it."
       />
-      <ResponsiveList headers={['Month', 'Year', 'Status', 'Locked by', 'Lock date', 'Unlocked by', 'Unlock date']} rows={rows} />
+      <LoadState loading={loading} error={error} onRetry={load}>
+        <ResponsiveList headers={['Month', 'Year', 'Status', 'Locked by', 'Lock date', 'Unlocked by', 'Unlock date']} rows={rows} />
+      </LoadState>
       <ConfirmDialog
         opened={pending !== null}
         title={pendingLocked ? 'Unlock month' : 'Lock month'}
@@ -84,7 +129,8 @@ export function LockMonthPage() {
         }
         confirmLabel={pendingLocked ? 'Unlock' : 'Lock'}
         color={pendingLocked ? 'terracotta' : 'red'}
-        onConfirm={confirm}
+        loading={busy}
+        onConfirm={() => void confirm()}
         onClose={() => setPending(null)}
       />
     </Stack>

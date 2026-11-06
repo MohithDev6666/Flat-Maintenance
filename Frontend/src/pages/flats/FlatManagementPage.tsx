@@ -1,42 +1,94 @@
 import { Alert, Button, Group, Modal, Stack } from '@mantine/core'
 import { IconPlus } from '@tabler/icons-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ConfirmDialog } from '../../components/common/ConfirmDialog.tsx'
 import { EmptyState } from '../../components/common/EmptyState.tsx'
 import { FilePreview } from '../../components/common/FilePreview.tsx'
+import { LoadState } from '../../components/common/LoadState.tsx'
 import { ResponsiveList, StackedCell } from '../../components/common/ResponsiveList.tsx'
 import { StatusBadge } from '../../components/common/StatusBadge.tsx'
 import { PageHeading } from '../../components/ui/PageHeading.tsx'
 import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
 import { usePermissions } from '../../hooks/usePermissions.ts'
-import type { Attachment, Flat } from '../../types/models.ts'
+import { getErrorMessage } from '../../services/apiClient.ts'
+import { emptyBuilding, getBuilding } from '../../services/buildingService.ts'
+import { deleteFlat, getManagedFlats } from '../../services/flatService.ts'
+import { getOwners } from '../../services/ownerService.ts'
+import { getTenants } from '../../services/tenantService.ts'
+import { getAccounts } from '../../services/userService.ts'
+import type { Attachment, Building, Flat, Owner, Tenant, UserAccount } from '../../types/models.ts'
 import { activeTenantOf, occupiedBy, ownerOf, sortByFlatNumber } from '../../utils/calculations.ts'
 import { formatPhone } from '../../utils/format.ts'
-import { notifyResult } from '../../utils/notify.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 import { FlatDetails } from './FlatDetails.tsx'
 import { FlatForm } from './FlatForm.tsx'
 
 /** Admin → Flats. Same flat data and detail card as the common Flats page, plus add, edit, and delete. */
 export function FlatManagementPage() {
   const { user } = useAuth()
-  const { flats, owners, tenants, accounts, building, deleteFlat } = useBuilding()
   const { can } = usePermissions()
+  const [flats, setFlats] = useState<Flat[]>([])
+  const [owners, setOwners] = useState<Owner[]>([])
+  const [tenants, setTenants] = useState<Tenant[]>([])
+  const [accounts, setAccounts] = useState<UserAccount[]>([])
+  const [building, setBuilding] = useState<Building>(emptyBuilding)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Flat | null>(null)
   const [viewing, setViewing] = useState<Flat | null>(null)
   const [deleting, setDeleting] = useState<Flat | null>(null)
+  const [busy, setBusy] = useState(false)
   const [proof, setProof] = useState<Attachment | null>(null)
+  const canSeeUsers = can('users', 'view')
+  const canSeeBuilding = can('building', 'view')
+
+  const load = useCallback(async () => {
+    try {
+      const [flatList, ownerList, tenantList, accountList, buildingRecord] = await Promise.all([
+        getManagedFlats(),
+        getOwners(),
+        getTenants(),
+        // Logins and the building size are extra detail; the page still works without them.
+        canSeeUsers ? getAccounts().catch(() => []) : Promise.resolve([]),
+        canSeeBuilding ? getBuilding().catch(() => emptyBuilding) : Promise.resolve(emptyBuilding),
+      ])
+      setFlats(flatList)
+      setOwners(ownerList)
+      setTenants(tenantList)
+      setAccounts(accountList)
+      setBuilding(buildingRecord)
+      setError(null)
+    } catch (failure) {
+      setError(getErrorMessage(failure))
+    } finally {
+      setLoading(false)
+    }
+  }, [canSeeUsers, canSeeBuilding])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
   if (!user) return null
 
   const open = (flat: Flat | null) => {
     setEditing(flat)
     setFormOpen(true)
   }
-  const remove = () => {
+  const remove = async () => {
     if (!deleting) return
-    notifyResult(deleteFlat(deleting.id, user.name), { title: 'Flat deleted', message: `Flat ${deleting.number}` }, 'Not deleted')
-    setDeleting(null)
+    setBusy(true)
+    try {
+      await deleteFlat(deleting.id)
+      notifySuccess('Flat deleted', `Flat ${deleting.number}`)
+      setDeleting(null)
+      await load()
+    } catch (failure) {
+      notifyApiError(failure, 'Not deleted')
+    } finally {
+      setBusy(false)
+    }
   }
   const ownerLogin = (ownerId: string | undefined) => accounts.find((account) => account.ownerId === ownerId)?.email ?? 'No login yet'
 
@@ -98,23 +150,36 @@ export function FlatManagementPage() {
           ) : null
         }
       />
-      {flats.length !== building.totalFlats ? (
-        <Alert color="yellow" variant="light" title="Flat count">
-          Building Information says {building.totalFlats} flats, and {flats.length} are set up here. Shares are split across the{' '}
-          {flats.length} flats listed.
-        </Alert>
-      ) : null}
-      {rows.length === 0 ? (
-        <EmptyState title="No flats yet" message="Add the first flat to start linking owners and tenants." />
-      ) : (
-        <ResponsiveList headers={['Flat', 'Status', 'Occupied by', 'Owner', 'Tenant', 'Owner login']} rows={rows} />
-      )}
+      <LoadState loading={loading} error={error} onRetry={load}>
+        <Stack gap="lg">
+          {building.totalFlats > 0 && flats.length !== building.totalFlats ? (
+            <Alert color="yellow" variant="light" title="Flat count">
+              Building Information says {building.totalFlats} flats, and {flats.length} are set up here. Shares are split across the{' '}
+              {flats.length} flats listed.
+            </Alert>
+          ) : null}
+          {rows.length === 0 ? (
+            <EmptyState title="No flats yet" message="Add the first flat to start linking owners and tenants." />
+          ) : (
+            <ResponsiveList headers={['Flat', 'Status', 'Occupied by', 'Owner', 'Tenant', 'Owner login']} rows={rows} />
+          )}
+        </Stack>
+      </LoadState>
 
-      <FlatForm opened={formOpen} flat={editing} onClose={() => setFormOpen(false)} />
+      <FlatForm
+        opened={formOpen}
+        flat={editing}
+        flats={flats}
+        owners={owners}
+        tenants={tenants}
+        floors={building.floors}
+        onClose={() => setFormOpen(false)}
+        onSaved={() => void load()}
+      />
       <Modal opened={viewing !== null} onClose={() => setViewing(null)} title="Flat details" size="lg">
         {viewing ? (
           <Stack gap="sm">
-            <FlatDetails flat={viewing} viewer={user} onViewProof={setProof} showHistory bordered />
+            <FlatDetails flat={viewing} owners={owners} tenants={tenants} viewer={user} onViewProof={setProof} showHistory bordered />
             {can('flatManagement', 'edit') ? (
               <Group justify="flex-end">
                 <Button
@@ -136,7 +201,8 @@ export function FlatManagementPage() {
         title="Delete flat"
         message={deleting ? `Delete flat ${deleting.number}? A flat with an owner, tenants, or payments cannot be deleted.` : ''}
         confirmLabel="Delete flat"
-        onConfirm={remove}
+        loading={busy}
+        onConfirm={() => void remove()}
         onClose={() => setDeleting(null)}
       />
       <FilePreview file={proof} title="ID proof" note="Private to the admin and the owner of this flat." onClose={() => setProof(null)} />

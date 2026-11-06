@@ -1,14 +1,12 @@
 import { Anchor, Badge, Box, Card, Divider, Group, Stack, Text, Title } from '@mantine/core'
 import { Link } from 'react-router-dom'
 import { ExpenseRow } from '../../components/expenses/ExpenseRow.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import { calendar } from '../../mocks/calendar.ts'
 import { paths } from '../../routes/nav.ts'
 import type { Expense, SessionUser } from '../../types/models.ts'
+import { calendar } from '../../utils/calendar.ts'
 import { firstName, formatMonth, greeting } from '../../utils/format.ts'
 
-export function DashboardHeader({ user }: { user: SessionUser }) {
-  const { building, isLocked } = useBuilding()
+export function DashboardHeader({ user, buildingName, locked }: { user: SessionUser; buildingName: string; locked: boolean }) {
   return (
     <Stack gap={6}>
       <Group gap="xs">
@@ -18,7 +16,7 @@ export function DashboardHeader({ user }: { user: SessionUser }) {
         <Badge variant="outline" color="terracotta">
           {user.flatNumber ? `Flat ${user.flatNumber}` : 'Building account'}
         </Badge>
-        {isLocked(calendar.currentMonth) ? (
+        {locked ? (
           <Badge color="red" variant="light">
             Month locked
           </Badge>
@@ -27,7 +25,7 @@ export function DashboardHeader({ user }: { user: SessionUser }) {
       <Title order={2}>
         {greeting()}, {firstName(user.name)}
       </Title>
-      <Text c="dimmed">Shared maintenance for {building.name}.</Text>
+      <Text c="dimmed">Shared maintenance for {buildingName || 'your building'}.</Text>
     </Stack>
   )
 }
@@ -52,6 +50,11 @@ export function LatestExpensesCard({
         ) : null}
       </Group>
       <Stack gap={0}>
+        {expenses.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            No expenses recorded yet.
+          </Text>
+        ) : null}
         {expenses.map((expense, index) => (
           <div key={expense.id}>
             {index > 0 ? <Divider my="xs" color="sand.2" /> : null}

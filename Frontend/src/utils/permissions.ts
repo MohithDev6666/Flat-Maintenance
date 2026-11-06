@@ -45,7 +45,8 @@ export function canEditExpense(user: SessionUser, expense: Expense, locked: bool
   return can(user, 'expenses', 'edit') && expense.paidByUserId === user.id
 }
 
-export function canDeleteExpense(user: SessionUser, expense: Expense, locked: boolean): boolean {
+/** The API lets only administrators delete expenses. */
+export function canDeleteExpense(user: SessionUser, _expense: Expense, locked: boolean): boolean {
   if (locked || !can(user, 'expenses', 'delete')) return false
-  return can(user, 'expenses', 'manage') || expense.paidByUserId === user.id
+  return can(user, 'expenses', 'manage')
 }

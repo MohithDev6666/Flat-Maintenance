@@ -1,21 +1,41 @@
 import { ActionIcon, AppShell, Divider, Group, NavLink, Stack, Text } from '@mantine/core'
 import { IconChevronLeft } from '@tabler/icons-react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
 import { adminNavFor, navFor, type NavItem } from '../../routes/nav.ts'
+import { getBuilding } from '../../services/buildingService.ts'
 import { splitBuildingName } from '../../utils/format.ts'
+import { can } from '../../utils/permissions.ts'
 import { BrandMark } from '../brand/BrandMark.tsx'
+
+const DEFAULT_NAME = 'Flat Maintenance'
 
 export function SidebarNav({ onClose }: { onClose: () => void }) {
   const { user } = useAuth()
-  const { building } = useBuilding()
   const { pathname } = useLocation()
+  const [buildingName, setBuildingName] = useState(DEFAULT_NAME)
+  const canViewBuilding = user ? can(user, 'building', 'view') : false
+
+  // The building name brands the sidebar. Residents without Building access see the default name.
+  useEffect(() => {
+    if (!canViewBuilding) return
+    let active = true
+    getBuilding()
+      .then((building) => {
+        if (active && building.name.trim()) setBuildingName(building.name)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [canViewBuilding])
+
   if (!user) return null
 
   const items = navFor(user)
   const adminItems = adminNavFor(user)
-  const brand = splitBuildingName(building.name)
+  const brand = splitBuildingName(buildingName)
 
   const renderItem = (item: NavItem) => {
     const Icon = item.icon

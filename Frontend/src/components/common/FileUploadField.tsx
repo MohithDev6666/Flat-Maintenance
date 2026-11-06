@@ -9,7 +9,7 @@ import { UploadPreview } from '../ui/UploadPreview.tsx'
 
 /**
  * Photo or PDF picker with an in-page preview and a camera button for phones.
- * The file stays in memory as an object URL, which is enough for this static build.
+ * The file is kept as a data URL and saved with the record by the API.
  */
 export function FileUploadField({
   label,
@@ -31,8 +31,16 @@ export function FileUploadField({
   const openPicker = useRef<() => void>(null)
   const cameraInput = useRef<HTMLInputElement>(null)
 
+  // Read the file as a data URL so it is saved with the record and still opens after a reload.
   const take = (file: File) => {
-    onChange({ name: file.name, url: URL.createObjectURL(file), kind: chosenFileKind(file) })
+    const reader = new FileReader()
+    reader.onload = () => {
+      onChange({ name: file.name, url: typeof reader.result === 'string' ? reader.result : null, kind: chosenFileKind(file) })
+    }
+    reader.onerror = () => {
+      notifications.show({ color: 'red', title: 'File not added', message: 'That file could not be read. Try another one.' })
+    }
+    reader.readAsDataURL(file)
   }
 
   return (

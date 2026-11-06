@@ -85,7 +85,11 @@ func (ph *PaymentsHandlerImpl) CreatePaymentHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid JSON object required"})
 		return
 	}
+	// A resident's upload waits for an admin to verify it; a payment the admin records is verified already.
+	payment.Status = models.PaymentVerified
+	payment.NeedsCheck, payment.CheckNote = false, ""
 	if !admin {
+		payment.Status = models.PaymentPending
 		if err := ph.paymentService.ApplyResidentIdentity(c, profile, &payment); err != nil {
 			utils.RespondError(c, err)
 			return

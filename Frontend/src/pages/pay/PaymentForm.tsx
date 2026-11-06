@@ -2,13 +2,15 @@ import { Alert, Button, Card, Input, NumberInput, SegmentedControl, Select, Simp
 import { DatePickerInput } from '@mantine/dates'
 import { useForm } from '@mantine/form'
 import dayjs from 'dayjs'
+import { useState } from 'react'
 import { FileUploadField } from '../../components/common/FileUploadField.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import { calendar } from '../../mocks/calendar.ts'
-import type { Attachment, Payment, PaymentMode, ResidentKind, SessionUser } from '../../types/models.ts'
-import { activeTenantOf, listMonths, ownerOf, partyForUser, sortByFlatNumber, type Party } from '../../utils/calculations.ts'
+import { createPayment } from '../../services/paymentService.ts'
+import type { MonthOption } from '../../services/reportService.ts'
+import type { Attachment, Flat, Owner, Payment, PaymentMode, ResidentKind, SessionUser, Tenant, UserAccount } from '../../types/models.ts'
+import { calendar } from '../../utils/calendar.ts'
+import { activeTenantOf, ownerOf, sortByFlatNumber, type Party } from '../../utils/calculations.ts'
 import { formatMonth } from '../../utils/format.ts'
-import { notifyError, notifyResult } from '../../utils/notify.ts'
+import { notifyApiError, notifyError, notifySuccess } from '../../utils/notify.ts'
 
 interface PaymentFormValues {
   flatId: string
@@ -22,16 +24,40 @@ interface PaymentFormValues {
 }
 
 /**
- * Records money paid to the building. Owners and tenants pay for themselves;
- * the admin picks the flat and whether the owner or tenant paid.
+ * Records money paid to the building. Owners and tenants pay for themselves (the API fills in
+ * their flat and record); the admin picks the flat and whether the owner or tenant paid.
  */
-export function PaymentForm({ user, month, onMonthChange }: { user: SessionUser; month: string; onMonthChange: (month: string) => void }) {
-  const { flats, owners, tenants, accounts, expenses, addPayment, isLocked, payments } = useBuilding()
-  const data = { flats, owners, tenants, accounts }
+export function PaymentForm({
+  user,
+  month,
+  onMonthChange,
+  flats,
+  owners,
+  tenants,
+  accounts,
+  months: monthList,
+  payments,
+  isLocked,
+  onSaved,
+}: {
+  user: SessionUser
+  month: string
+  onMonthChange: (month: string) => void
+  flats: Flat[]
+  owners: Owner[]
+  tenants: Tenant[]
+  accounts: UserAccount[]
+  /** From the pay-status API: months with expenses plus the current month, newest first. */
+  months: MonthOption[]
+  payments: Payment[]
+  isLocked: (month: string) => boolean
+  onSaved: () => void
+}) {
   const forAdmin = user.role === 'admin'
+  const [saving, setSaving] = useState(false)
   const form = useForm<PaymentFormValues>({
     initialValues: {
-      flatId: flats[0]?.id ?? '',
+      flatId: sortByFlatNumber(flats)[0]?.id ?? '',
       payAs: 'owner',
       month,
       amount: '',
@@ -41,6 +67,7 @@ export function PaymentForm({ user, month, onMonthChange }: { user: SessionUser;
       screenshot: null,
     },
     validate: {
+      flatId: (value) => (!forAdmin || value ? null : 'Choose a flat'),
       month: (value) => (value ? null : 'Choose a month'),
       amount: (value) => (Number(value) > 0 ? null : 'Enter an amount above zero'),
       date: (value) => (value ? null : 'Choose the payment date'),
@@ -50,13 +77,19 @@ export function PaymentForm({ user, month, onMonthChange }: { user: SessionUser;
   })
 
   const locked = isLocked(form.values.month)
-  const monthOptions = listMonths(expenses)
-    .slice()
+  const months = new Set([...monthList.map((option) => option.month), month])
+  const monthOptions = [...months]
+    .sort()
     .reverse()
     .map((value) => ({ value, label: `${formatMonth(value)}${isLocked(value) ? ' · Locked' : ''}` }))
 
+  /** Who the payment is for. Residents pay as themselves. */
   const payerFor = (values: PaymentFormValues): Party | null => {
-    if (!forAdmin) return partyForUser(user, data)
+    if (!forAdmin) {
+      const residentId = user.role === 'owner' ? user.ownerId : user.tenantId
+      if (!residentId || user.role === 'admin') return null
+      return { kind: user.role, residentId, flatId: user.flatId, name: user.name }
+    }
     if (values.payAs === 'owner') {
       const owner = ownerOf(owners, values.flatId)
       return owner ? { kind: 'owner', residentId: owner.id, flatId: values.flatId, name: owner.name } : null
@@ -65,36 +98,44 @@ export function PaymentForm({ user, month, onMonthChange }: { user: SessionUser;
     return tenant ? { kind: 'tenant', residentId: tenant.id, flatId: values.flatId, name: tenant.name } : null
   }
 
-  const save = (values: PaymentFormValues) => {
+  const save = async (values: PaymentFormValues) => {
     const party = payerFor(values)
-    if (!party || !party.flatId || !values.screenshot || !values.date) {
-      notifyError('Not saved', forAdmin ? `That flat has no ${values.payAs} for ${formatMonth(values.month)}.` : 'Your account is not linked to a flat.')
+    if (!party || !values.screenshot || !values.date) {
+      notifyError(
+        'Not saved',
+        forAdmin ? `That flat has no ${values.payAs} for ${formatMonth(values.month)}.` : 'Your account is not linked to an owner or tenant record.',
+      )
       return
     }
     const login = accounts.find((account) => (party.kind === 'owner' ? account.ownerId : account.tenantId) === party.residentId)
-    const payment: Payment = {
-      id: `pay-${crypto.randomUUID()}`,
-      userId: forAdmin ? (login?.id ?? user.id) : user.id,
-      payerName: forAdmin ? (login?.name ?? party.name) : user.name,
-      flatId: party.flatId,
-      role: party.kind,
-      residentId: party.residentId,
-      month: values.month,
-      amount: Number(values.amount),
-      date: dayjs(values.date).format('YYYY-MM-DD'),
-      mode: values.mode,
-      reference: values.reference.trim(),
-      screenshot: values.screenshot,
-      needsCheck: false,
-      checkNote: '',
-    }
-    const saved = notifyResult(addPayment(payment), {
-      title: 'Payment saved',
-      message: 'My Contribution and Month Summary now include this amount.',
-    })
-    if (saved) {
+    setSaving(true)
+    try {
+      await createPayment({
+        userId: forAdmin ? (login?.id ?? user.id) : user.id,
+        payerName: forAdmin ? (login?.name ?? party.name) : user.name,
+        flatId: party.flatId ?? '',
+        role: party.kind,
+        residentId: party.residentId,
+        month: values.month,
+        amount: Number(values.amount),
+        date: dayjs(values.date).format('YYYY-MM-DD'),
+        mode: values.mode,
+        reference: values.reference,
+        screenshot: values.screenshot,
+      })
+      notifySuccess(
+        'Payment saved',
+        forAdmin
+          ? 'Recorded as verified. My Contribution and Month Summary now include this amount.'
+          : 'Sent for verification. It counts as paid once the admin verifies it.',
+      )
       form.setValues({ amount: '', reference: '', screenshot: null })
       form.resetDirty()
+      onSaved()
+    } catch (failure) {
+      notifyApiError(failure)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -103,7 +144,7 @@ export function PaymentForm({ user, month, onMonthChange }: { user: SessionUser;
 
   return (
     <Card maw={720}>
-      <form onSubmit={form.onSubmit(save)}>
+      <form onSubmit={form.onSubmit((values) => void save(values))}>
         <Stack gap="md">
           {locked ? (
             <Alert color="red" title="This month is locked">
@@ -116,6 +157,7 @@ export function PaymentForm({ user, month, onMonthChange }: { user: SessionUser;
                 label="Flat"
                 required
                 searchable
+                nothingFoundMessage="No flats. Add them on Admin → Flats."
                 data={sortByFlatNumber(flats).map((flat) => ({ value: flat.id, label: `Flat ${flat.number}` }))}
                 allowDeselect={false}
                 {...form.getInputProps('flatId')}
@@ -147,7 +189,7 @@ export function PaymentForm({ user, month, onMonthChange }: { user: SessionUser;
             }}
           />
           <SimpleGrid cols={{ base: 1, sm: 2 }}>
-            <NumberInput label="Amount" required prefix="₹ " min={0} thousandSeparator="," {...form.getInputProps('amount')} />
+            <NumberInput label="Amount" required prefix="₹ " min={0} decimalScale={2} thousandSeparator="," {...form.getInputProps('amount')} />
             <DatePickerInput label="Payment date" required valueFormat="DD-MM-YYYY" {...form.getInputProps('date')} />
           </SimpleGrid>
           <Input.Wrapper label="Payment mode" required>
@@ -175,7 +217,7 @@ export function PaymentForm({ user, month, onMonthChange }: { user: SessionUser;
             error={typeof form.errors.screenshot === 'string' ? form.errors.screenshot : null}
             onChange={(file) => form.setFieldValue('screenshot', file)}
           />
-          <Button type="submit" size="lg" fullWidth disabled={!form.values.screenshot || locked}>
+          <Button type="submit" size="lg" fullWidth disabled={!form.values.screenshot || locked} loading={saving}>
             Save payment
           </Button>
         </Stack>

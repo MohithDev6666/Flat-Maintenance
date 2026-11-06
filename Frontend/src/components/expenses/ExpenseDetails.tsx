@@ -2,11 +2,11 @@ import { Badge, Button, Group, Modal, Stack, Text } from '@mantine/core'
 import dayjs from 'dayjs'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import type { Attachment, Expense } from '../../types/models.ts'
+import { deleteExpense, updateExpense } from '../../services/expenseService.ts'
+import type { Attachment, Expense, ExpenseCategory } from '../../types/models.ts'
 import { monthOf } from '../../utils/calculations.ts'
 import { formatDate, formatINR, formatPhone } from '../../utils/format.ts'
-import { notifyResult } from '../../utils/notify.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 import { canDeleteExpense, canEditExpense, can } from '../../utils/permissions.ts'
 import { ConfirmDialog } from '../common/ConfirmDialog.tsx'
 import { FilePreview } from '../common/FilePreview.tsx'
@@ -17,15 +17,24 @@ export function ExpenseDetails({
   expense,
   opened,
   onClose,
+  categories,
+  isLocked,
+  flatCount,
+  onChanged,
 }: {
   expense: Expense | null
   opened: boolean
   onClose: () => void
+  categories: ExpenseCategory[]
+  isLocked: (month: string) => boolean
+  flatCount: number
+  /** Called after an edit or delete so the screen reloads its data. */
+  onChanged: () => void
 }) {
   const { user } = useAuth()
-  const { isLocked, updateExpense, deleteExpense } = useBuilding()
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [bill, setBill] = useState<Attachment | null>(null)
 
   useEffect(() => {
@@ -39,39 +48,48 @@ export function ExpenseDetails({
   const canEdit = expense ? canEditExpense(user, expense, locked) : false
   const canDelete = expense ? canDeleteExpense(user, expense, locked) : false
 
-  const save = (values: ExpenseFormValues) => {
+  const save = async (values: ExpenseFormValues) => {
     if (!expense || !values.date) return
-    const next: Expense = {
-      ...expense,
-      date: dayjs(values.date).format('YYYY-MM-DD'),
-      category: values.category,
-      responsibility: values.responsibility,
-      description: values.description,
-      amount: Number(values.amount),
-      vendorName: values.vendorName,
-      vendorPhone: values.vendorPhone,
-      paymentMode: values.paymentMode,
-      bill: values.bill,
-    }
-    const saved = notifyResult(updateExpense(next, user.name), {
-      title: 'Expense updated',
-      message: 'Expenses, dashboard, contribution, and month summary are recalculated.',
-    })
-    if (saved) {
+    setSaving(true)
+    try {
+      await updateExpense(expense.id, {
+        date: dayjs(values.date).format('YYYY-MM-DD'),
+        category: values.category,
+        responsibility: values.responsibility,
+        description: values.description,
+        amount: Number(values.amount),
+        vendorName: values.vendorName,
+        vendorPhone: values.vendorPhone,
+        paymentMode: values.paymentMode,
+        bill: values.bill,
+        paidBy: expense.paidBy,
+        paidByUserId: expense.paidByUserId,
+      })
+      notifySuccess('Expense updated', 'Expenses, dashboard, contribution, and month summary are recalculated.')
       setEditing(false)
       onClose()
+      onChanged()
+    } catch (failure) {
+      notifyApiError(failure)
+    } finally {
+      setSaving(false)
     }
   }
 
-  const remove = () => {
+  const remove = async () => {
     if (!expense) return
-    setConfirmDelete(false)
-    const removed = notifyResult(
-      deleteExpense(expense.id, user.name),
-      { title: 'Expense deleted', message: 'Totals have been recalculated.' },
-      'Not deleted',
-    )
-    if (removed) onClose()
+    setSaving(true)
+    try {
+      await deleteExpense(expense.id)
+      notifySuccess('Expense deleted', 'Totals have been recalculated.')
+      setConfirmDelete(false)
+      onClose()
+      onChanged()
+    } catch (failure) {
+      notifyApiError(failure, 'Not deleted')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -83,7 +101,11 @@ export function ExpenseDetails({
             paidByName={expense.paidBy}
             submitLabel={can(user, 'expenses', 'manage') ? 'Save or re-tag' : 'Save changes'}
             onCancel={() => setEditing(false)}
-            onSubmit={save}
+            onSubmit={(values) => void save(values)}
+            saving={saving}
+            categories={categories}
+            isLocked={isLocked}
+            flatCount={flatCount}
             initialValues={{
               date: expense.date,
               category: expense.category,
@@ -163,7 +185,8 @@ export function ExpenseDetails({
         title="Delete expense"
         message={expense ? `Delete ${expense.category} for ${formatINR(expense.amount)} on ${formatDate(expense.date)}? Every flat's share is recalculated.` : ''}
         confirmLabel="Delete expense"
-        onConfirm={remove}
+        loading={saving}
+        onConfirm={() => void remove()}
         onClose={() => setConfirmDelete(false)}
       />
       <FilePreview file={bill} title="Bill" note="Every signed-in resident can open a bill." onClose={() => setBill(null)} />

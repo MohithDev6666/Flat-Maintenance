@@ -1,36 +1,67 @@
 import { Badge, Button, SegmentedControl, Stack } from '@mantine/core'
 import { IconPlus } from '@tabler/icons-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ConfirmDialog } from '../../components/common/ConfirmDialog.tsx'
 import { EmptyState } from '../../components/common/EmptyState.tsx'
+import { LoadState } from '../../components/common/LoadState.tsx'
 import { ResponsiveList } from '../../components/common/ResponsiveList.tsx'
 import { StatusBadge } from '../../components/common/StatusBadge.tsx'
 import { PageHeading } from '../../components/ui/PageHeading.tsx'
-import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
 import { usePermissions } from '../../hooks/usePermissions.ts'
-import type { CategoryTag, ExpenseCategory } from '../../types/models.ts'
-import { notifyResult } from '../../utils/notify.ts'
+import { getErrorMessage } from '../../services/apiClient.ts'
+import { deleteCategory, getCategories } from '../../services/categoryService.ts'
+import { getExpenses } from '../../services/expenseService.ts'
+import type { CategoryTag, Expense, ExpenseCategory } from '../../types/models.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 import { CategoryForm } from './CategoryForm.tsx'
 
 export function CategoriesPage() {
-  const { user } = useAuth()
-  const { categories, expenses, removeCategory } = useBuilding()
   const { can } = usePermissions()
+  const [categories, setCategories] = useState<ExpenseCategory[]>([])
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [tag, setTag] = useState<'all' | CategoryTag>('all')
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<ExpenseCategory | null>(null)
   const [deleting, setDeleting] = useState<ExpenseCategory | null>(null)
-  if (!user) return null
+  const [busy, setBusy] = useState(false)
+  const canCountUsage = can('expenses', 'view')
+
+  const load = useCallback(async () => {
+    try {
+      const [categoryList, expenseList] = await Promise.all([getCategories(), canCountUsage ? getExpenses() : Promise.resolve([])])
+      setCategories(categoryList)
+      setExpenses(expenseList)
+      setError(null)
+    } catch (failure) {
+      setError(getErrorMessage(failure))
+    } finally {
+      setLoading(false)
+    }
+  }, [canCountUsage])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   const open = (category: ExpenseCategory | null) => {
     setEditing(category)
     setFormOpen(true)
   }
-  const remove = () => {
+  const remove = async () => {
     if (!deleting) return
-    notifyResult(removeCategory(deleting.id, user.name), { title: 'Category deleted', message: deleting.name }, 'Not deleted')
-    setDeleting(null)
+    setBusy(true)
+    try {
+      await deleteCategory(deleting.id)
+      notifySuccess('Category deleted', deleting.name)
+      setDeleting(null)
+      await load()
+    } catch (failure) {
+      notifyApiError(failure, 'Not deleted')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const rows = categories
@@ -95,18 +126,27 @@ export function CategoriesPage() {
           { label: 'Other', value: 'Other' },
         ]}
       />
-      {rows.length === 0 ? (
-        <EmptyState title="No categories here" />
-      ) : (
-        <ResponsiveList headers={['Category', 'Description', 'Default responsibility', 'Expenses', 'Status']} rows={rows} />
-      )}
-      <CategoryForm opened={formOpen} category={editing} onClose={() => setFormOpen(false)} />
+      <LoadState loading={loading} error={error} onRetry={load}>
+        {rows.length === 0 ? (
+          <EmptyState title={categories.length === 0 ? 'No categories yet' : 'No categories here'} message="Add a category to use it on expenses." />
+        ) : (
+          <ResponsiveList headers={['Category', 'Description', 'Default responsibility', 'Expenses', 'Status']} rows={rows} />
+        )}
+      </LoadState>
+      <CategoryForm
+        opened={formOpen}
+        category={editing}
+        categories={categories}
+        onClose={() => setFormOpen(false)}
+        onSaved={() => void load()}
+      />
       <ConfirmDialog
         opened={deleting !== null}
         title="Delete category"
         message={deleting ? `Delete ${deleting.name}? Only categories that no expense uses can be deleted.` : ''}
         confirmLabel="Delete category"
-        onConfirm={remove}
+        loading={busy}
+        onConfirm={() => void remove()}
         onClose={() => setDeleting(null)}
       />
     </Stack>

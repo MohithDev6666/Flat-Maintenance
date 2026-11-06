@@ -6,41 +6,26 @@ import paymentBanner from '../../assets/banner _payments.png'
 import { StatusBadge } from '../../components/common/StatusBadge.tsx'
 import { ExpenseDetails } from '../../components/expenses/ExpenseDetails.tsx'
 import { StatCard } from '../../components/ui/StatCard.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import { calendar } from '../../mocks/calendar.ts'
 import { paths } from '../../routes/nav.ts'
+import { lockChecker } from '../../services/monthLockService.ts'
 import type { Expense, SessionUser } from '../../types/models.ts'
 import { formatINR, formatPhone } from '../../utils/format.ts'
-import {
-  activeTenantOf,
-  flatStatus,
-  ownerOf,
-  partyForUser,
-  partyHistory,
-  shareLinesFor,
-  sortExpenses,
-} from '../../utils/calculations.ts'
 import { can } from '../../utils/permissions.ts'
+import type { DashboardData } from './DashboardPage.tsx'
 import { BannerLink, DashboardHeader, LatestExpensesCard } from './DashboardParts.tsx'
 
 /** Owner and tenant dashboard. Both see their own share; only the linked resident record differs. */
-export function ResidentDashboard({ user }: { user: SessionUser }) {
-  const { expenses, flats, owners, tenants, accounts, payments } = useBuilding()
+export function ResidentDashboard({ user, data: report, onChanged }: { user: SessionUser; data: DashboardData; onChanged: () => void }) {
+  // The month's share, credit, arrears and balance come calculated from the dashboard API.
+  const { recentExpenses: recent, shareLines: lines, flagged, pendingCount, flatCount, categories, monthLocks, buildingName } = report
+  const isLocked = lockChecker(monthLocks)
   const [openedExpense, setOpenedExpense] = useState<Expense | null>(null)
-  const data = { flats, owners, tenants, accounts }
-
-  const party = partyForUser(user, data)
-  const history = party ? partyHistory(party, expenses, data, payments) : []
-  const current = history.find((row) => row.month === calendar.currentMonth)
-  const snapshot = current ?? { due: 0, credit: 0, arrears: 0, paidToBuilding: 0, owedToYou: 0, balance: 0 }
-  const recent = sortExpenses(expenses).slice(0, 5)
-  const lines = party ? shareLinesFor(party, expenses, data, calendar.currentMonth) : []
+  const snapshot = report.snapshot ?? { due: 0, credit: 0, arrears: 0, paidToBuilding: 0, pendingVerification: 0, owedToYou: 0, balance: 0 }
   const positive = snapshot.owedToYou > 0
-  const flagged = payments.filter((payment) => payment.userId === user.id && payment.needsCheck)
 
   return (
     <Stack gap="lg">
-      <DashboardHeader user={user} />
+      <DashboardHeader user={user} buildingName={buildingName} locked={report.locked} />
 
       <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
         <UnstyledButton component={Link} to={paths.contribution} aria-label="My due, open My Contribution">
@@ -74,6 +59,13 @@ export function ResidentDashboard({ user }: { user: SessionUser }) {
           />
         ) : null}
       </Stack>
+      {pendingCount > 0 ? (
+        <Text c="orange.8" fw={600}>
+          {pendingCount === 1 ? 'Your payment is' : `${pendingCount} of your payments are`} waiting for the admin to verify
+          {snapshot.pendingVerification > 0 ? ` (${formatINR(snapshot.pendingVerification)} this month)` : ''}. It counts as
+          paid once verified.
+        </Text>
+      ) : null}
       {flagged.length > 0 ? (
         <Text c="red.8" fw={600}>
           {flagged.length === 1 ? 'A payment needs a check' : `${flagged.length} payments need a check`}:{' '}
@@ -87,7 +79,7 @@ export function ResidentDashboard({ user }: { user: SessionUser }) {
         <Card>
           <Text fw={700}>How your share is built</Text>
           <Text size="sm" c="dimmed" mb="sm">
-            Each line is the expense divided by {flats.length}, rounded to the nearest rupee.
+            Each line is the expense divided equally by {flatCount}, exact to the paisa.
           </Text>
           <Stack gap="sm">
             {lines.map((line) => (
@@ -122,29 +114,33 @@ export function ResidentDashboard({ user }: { user: SessionUser }) {
         </Card>
       </SimpleGrid>
 
-      {user.flatId ? <MyFlatCard user={user} /> : null}
+      {report.myFlat ? <MyFlatCard flat={report.myFlat} /> : null}
 
-      <ExpenseDetails expense={openedExpense} opened={openedExpense !== null} onClose={() => setOpenedExpense(null)} />
+      <ExpenseDetails
+        expense={openedExpense}
+        opened={openedExpense !== null}
+        onClose={() => setOpenedExpense(null)}
+        categories={categories}
+        isLocked={isLocked}
+        flatCount={flatCount}
+        onChanged={onChanged}
+      />
     </Stack>
   )
 }
 
-function MyFlatCard({ user }: { user: SessionUser }) {
-  const { flats, owners, tenants } = useBuilding()
-  const flat = flats.find((item) => item.id === user.flatId)
-  if (!user.flatId || !flat) return null
-  const owner = ownerOf(owners, user.flatId)
-  const tenant = activeTenantOf(tenants, user.flatId)
+function MyFlatCard({ flat }: { flat: NonNullable<DashboardData['myFlat']> }) {
+  const { owner, tenant } = flat
   return (
     <Card>
       <Group justify="space-between" mb="sm">
         <div>
           <Text fw={700}>My flat</Text>
           <Text size="sm" c="dimmed">
-            Flat {user.flatNumber} · Floor {user.floor}
+            Flat {flat.number} · Floor {flat.floor}
           </Text>
         </div>
-        <StatusBadge status={flatStatus(flat, owners, tenants)} />
+        <StatusBadge status={flat.status} />
       </Group>
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
         <Stack gap={2}>

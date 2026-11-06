@@ -5,27 +5,25 @@ import expenseBanner from '../../assets/banner_expensives.png'
 import paymentBanner from '../../assets/banner _payments.png'
 import { ExpenseDetails } from '../../components/expenses/ExpenseDetails.tsx'
 import { StatCard } from '../../components/ui/StatCard.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import { calendar } from '../../mocks/calendar.ts'
 import { paths } from '../../routes/nav.ts'
+import { lockChecker } from '../../services/monthLockService.ts'
 import type { Expense, SessionUser } from '../../types/models.ts'
 import { formatINR, formatMonth } from '../../utils/format.ts'
-import { buildMonthLedger, sortExpenses } from '../../utils/calculations.ts'
+import type { DashboardData } from './DashboardPage.tsx'
 import { BannerLink, DashboardHeader, LatestExpensesCard } from './DashboardParts.tsx'
 
-export function AdminDashboard({ user }: { user: SessionUser }) {
-  const { expenses, flats, owners, tenants, accounts, payments, isLocked } = useBuilding()
+export function AdminDashboard({ user, data, onChanged }: { user: SessionUser; data: DashboardData; onChanged: () => void }) {
+  // Totals, the review queue and the latest expenses all come calculated from the dashboard API.
+  const { totals: ledger, recentExpenses: recent, flagged, pendingCount, flatCount, categories, monthLocks, buildingName } = data
+  const isLocked = lockChecker(monthLocks)
   const [openedExpense, setOpenedExpense] = useState<Expense | null>(null)
 
-  const ledger = buildMonthLedger(expenses, { flats, owners, tenants, accounts }, calendar.currentMonth)
-  const recent = sortExpenses(expenses).slice(0, 5)
-  const locked = isLocked(calendar.currentMonth)
-  const flagged = payments.filter((payment) => payment.userId === user.id && payment.needsCheck)
-  const monthName = formatMonth(calendar.currentMonth).split(' ')[0]
+  const locked = data.locked
+  const monthName = formatMonth(data.month).split(' ')[0]
 
   return (
     <Stack gap="lg">
-      <DashboardHeader user={user} />
+      <DashboardHeader user={user} buildingName={buildingName} locked={locked} />
 
       <SimpleGrid cols={{ base: 2, md: 4 }} spacing="md">
         <StatCard label="Building total" value={formatINR(ledger.total)} hint={`All ${monthName} expenses`} />
@@ -43,6 +41,12 @@ export function AdminDashboard({ user }: { user: SessionUser }) {
         />
         <BannerLink to={paths.pay} image={paymentBanner} title="Pay" detail="Upload a screenshot and record the payment." />
       </Stack>
+      {pendingCount > 0 ? (
+        <Text c="orange.8" fw={600}>
+          {pendingCount === 1 ? 'A payment is waiting for verification' : `${pendingCount} payments are waiting for verification`}{' '}
+          on Pay / Upload.
+        </Text>
+      ) : null}
       {flagged.length > 0 ? (
         <Text c="red.8" fw={600}>
           {flagged.length === 1 ? 'A payment needs a check' : `${flagged.length} payments need a check`}:{' '}
@@ -55,7 +59,7 @@ export function AdminDashboard({ user }: { user: SessionUser }) {
         <Card>
           <Text fw={700}>Owner and tenant pools</Text>
           <Text size="sm" c="dimmed" mb="sm">
-            {monthName} split across {flats.length} flats
+            {monthName} split across {flatCount} flats
           </Text>
           <BarChart
             h={240}
@@ -73,7 +77,15 @@ export function AdminDashboard({ user }: { user: SessionUser }) {
         </Card>
       </SimpleGrid>
 
-      <ExpenseDetails expense={openedExpense} opened={openedExpense !== null} onClose={() => setOpenedExpense(null)} />
+      <ExpenseDetails
+        expense={openedExpense}
+        opened={openedExpense !== null}
+        onClose={() => setOpenedExpense(null)}
+        categories={categories}
+        isLocked={isLocked}
+        flatCount={flatCount}
+        onChanged={onChanged}
+      />
     </Stack>
   )
 }

@@ -1,16 +1,21 @@
 import { Button, Group, Modal, Select, SimpleGrid, Stack, Text, TextInput } from '@mantine/core'
 import { DatePickerInput } from '@mantine/dates'
 import { useForm } from '@mantine/form'
-import { useEffect } from 'react'
+import dayjs from 'dayjs'
+import { useEffect, useState } from 'react'
 import { FileUploadField } from '../../components/common/FileUploadField.tsx'
-import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import { idProofTypes, type Attachment, type IdProofType, type Tenant } from '../../types/models.ts'
-import { flatStatus, ownerOf, sortByFlatNumber } from '../../utils/calculations.ts'
+import { createTenant, updateTenant } from '../../services/tenantService.ts'
+import { idProofTypes, type Attachment, type Flat, type IdProofType, type Owner, type Tenant } from '../../types/models.ts'
+import { flatStatus, occupiedBy, ownerOf, sortByFlatNumber } from '../../utils/calculations.ts'
 import { formatPhone } from '../../utils/format.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 
 const occupantChoices = Array.from({ length: 10 }, (_, index) => String(index + 1))
-import { notifyResult } from '../../utils/notify.ts'
+
+/** Date pickers may hand back a Date or a string; the API wants YYYY-MM-DD. */
+function isoDate(value: string | null): string | null {
+  return value ? dayjs(value).format('YYYY-MM-DD') : null
+}
 
 interface TenantFormValues {
   name: string
@@ -42,9 +47,24 @@ const empty: TenantFormValues = {
   vehicle: '',
 }
 
-export function TenantForm({ opened, tenant, onClose }: { opened: boolean; tenant: Tenant | null; onClose: () => void }) {
-  const { user } = useAuth()
-  const { flats, owners, tenants, saveTenant } = useBuilding()
+export function TenantForm({
+  opened,
+  tenant,
+  tenants,
+  owners,
+  flats,
+  onClose,
+  onSaved,
+}: {
+  opened: boolean
+  tenant: Tenant | null
+  tenants: Tenant[]
+  owners: Owner[]
+  flats: Flat[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [saving, setSaving] = useState(false)
   const form = useForm<TenantFormValues>({
     initialValues: empty,
     validate: {
@@ -54,7 +74,8 @@ export function TenantForm({ opened, tenant, onClose }: { opened: boolean; tenan
       flatId: (value) => (value ? null : 'Choose a flat'),
       occupants: (value) => (Number(value) >= 1 ? null : 'At least 1 occupant'),
       moveIn: (value) => (value ? null : 'Choose the move-in date'),
-      moveOut: (value, values) => (value && values.moveIn && value < values.moveIn ? 'Move-out cannot be before move-in' : null),
+      moveOut: (value, values) =>
+        value && values.moveIn && dayjs(value).isBefore(dayjs(values.moveIn), 'day') ? 'Move-out cannot be before move-in' : null,
       agreementEnd: (value) => (value ? null : 'Choose the agreement end date'),
       emergency: (value) => (value.trim() ? null : 'Enter an emergency contact'),
     },
@@ -64,42 +85,47 @@ export function TenantForm({ opened, tenant, onClose }: { opened: boolean; tenan
     if (!opened) return
     form.setValues(tenant ? { ...tenant, flatId: tenant.flatId ?? '', occupants: String(tenant.occupants) } : empty)
     form.resetDirty()
+    form.clearErrors()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, tenant])
 
-  if (!user) return null
-
   const owner = ownerOf(owners, form.values.flatId || null)
 
-  const save = (values: TenantFormValues) => {
-    if (!values.moveIn || !values.agreementEnd) return
-    const done = notifyResult(
-      saveTenant(
-        {
-          id: tenant?.id ?? `tenant-${crypto.randomUUID()}`,
-          name: values.name,
-          phone: values.phone,
-          email: values.email,
-          flatId: values.flatId || null,
-          occupants: Number(values.occupants),
-          moveIn: values.moveIn,
-          moveOut: values.moveOut || null,
-          agreementEnd: values.agreementEnd,
-          idProofType: values.idProofType,
-          idProof: values.idProof,
-          emergency: values.emergency,
-          vehicle: values.vehicle,
-        },
-        user.name,
-      ),
-      { title: tenant ? 'Tenant updated' : 'Tenant added', message: `${values.name.trim()} · flat occupancy updated` },
-    )
-    if (done) onClose()
+  const save = async (values: TenantFormValues) => {
+    const moveIn = isoDate(values.moveIn)
+    const agreementEnd = isoDate(values.agreementEnd)
+    if (!moveIn || !agreementEnd) return
+    const input = {
+      name: values.name,
+      phone: values.phone,
+      email: values.email,
+      flatId: values.flatId || null,
+      occupants: Number(values.occupants),
+      moveIn,
+      moveOut: isoDate(values.moveOut),
+      agreementEnd,
+      idProofType: values.idProofType,
+      idProof: values.idProof,
+      emergency: values.emergency,
+      vehicle: values.vehicle,
+    }
+    setSaving(true)
+    try {
+      if (tenant) await updateTenant(tenant.id, input)
+      else await createTenant(input)
+      notifySuccess(tenant ? 'Tenant updated' : 'Tenant added', `${values.name.trim()} · flat occupancy updated`)
+      onSaved()
+      onClose()
+    } catch (failure) {
+      notifyApiError(failure)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <Modal opened={opened} onClose={onClose} title={tenant ? 'Edit tenant' : 'Add tenant'} size="lg">
-      <form onSubmit={form.onSubmit(save)}>
+      <form onSubmit={form.onSubmit((values) => void save(values))}>
         <Stack gap="sm">
           <TextInput label="Tenant name" required {...form.getInputProps('name')} />
           <SimpleGrid cols={{ base: 1, sm: 2 }}>
@@ -111,11 +137,18 @@ export function TenantForm({ opened, tenant, onClose }: { opened: boolean; tenan
               label="Flat"
               required
               searchable
-              description="Each flat is listed with its owner and who lives there today."
-              data={sortByFlatNumber(flats).map((flat) => ({
-                value: flat.id,
-                label: `Flat ${flat.number} · ${ownerOf(owners, flat.id)?.name ?? 'no owner'} · ${flatStatus(flat, owners, tenants)}`,
-              }))}
+              description="Flats the owner lives in cannot be rented out and are greyed out."
+              data={sortByFlatNumber(flats).map((flat) => {
+                // A flat the owner lives in takes no tenant; the tenant's own flat stays selectable when editing.
+                const ownerLivesHere = occupiedBy(flat, tenants) === 'Owner' && flat.id !== tenant?.flatId
+                return {
+                  value: flat.id,
+                  label: `Flat ${flat.number} · ${ownerOf(owners, flat.id)?.name ?? 'no owner'} · ${
+                    ownerLivesHere ? 'Owner-occupied' : flatStatus(flat, owners, tenants)
+                  }`,
+                  disabled: ownerLivesHere,
+                }
+              })}
               allowDeselect={false}
               {...form.getInputProps('flatId')}
             />
@@ -168,10 +201,12 @@ export function TenantForm({ opened, tenant, onClose }: { opened: boolean; tenan
             onChange={(file) => form.setFieldValue('idProof', file)}
           />
           <Group justify="flex-end">
-            <Button variant="default" onClick={onClose}>
+            <Button variant="default" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit">{tenant ? 'Save tenant' : 'Add tenant'}</Button>
+            <Button type="submit" loading={saving}>
+              {tenant ? 'Save tenant' : 'Add tenant'}
+            </Button>
           </Group>
         </Stack>
       </form>

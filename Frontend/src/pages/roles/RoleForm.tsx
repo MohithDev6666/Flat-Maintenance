@@ -1,19 +1,18 @@
-import { Alert, Button, Checkbox, Group, Modal, Select, SimpleGrid, Stack, Table, Text, Textarea, TextInput } from '@mantine/core'
+import { Alert, Button, Checkbox, Group, Modal, Select, SimpleGrid, Stack, Switch, Table, Text, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
-import { useEffect } from 'react'
-import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import { adminModules, allActions, commonModules, residentPermissions } from '../../mocks/roles.ts'
-import type { AppRole, PermissionAction, PermissionModule, PermissionSet, RecordStatus, Role } from '../../types/models.ts'
+import { useEffect, useState } from 'react'
+import { createRole, updateRole } from '../../services/roleService.ts'
+import type { AppRole, PermissionAction, PermissionModule, PermissionSet, RecordStatus } from '../../types/models.ts'
+import { commonModules, residentPermissions, roleActions } from '../../utils/modules.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 import { hasPermission } from '../../utils/permissions.ts'
-import { notifyResult } from '../../utils/notify.ts'
-import { actionLabels, kindLabels, moduleLabels } from './permissionLabels.ts'
+import { actionLabels, moduleLabels } from './permissionLabels.ts'
 
 interface RoleFormValues {
   name: string
   description: string
   status: RecordStatus
-  kind: Role
+  isAdmin: boolean
   permissions: PermissionSet
 }
 
@@ -21,66 +20,86 @@ const empty: RoleFormValues = {
   name: '',
   description: '',
   status: 'Active',
-  kind: 'owner',
+  isAdmin: false,
   permissions: residentPermissions(),
 }
 
-export function RoleForm({ opened, role, onClose }: { opened: boolean; role: AppRole | null; onClose: () => void }) {
-  const { user } = useAuth()
-  const { saveRole } = useBuilding()
+export function RoleForm({
+  opened,
+  role,
+  roles,
+  onClose,
+  onSaved,
+}: {
+  opened: boolean
+  role: AppRole | null
+  /** Existing roles, to catch a duplicate name before calling the API. */
+  roles: AppRole[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [saving, setSaving] = useState(false)
   const form = useForm<RoleFormValues>({
     initialValues: empty,
-    validate: { name: (value) => (value.trim() ? null : 'Enter a role name') },
+    validate: {
+      name: (value) => {
+        const name = value.trim()
+        if (!name) return 'Enter a role name'
+        const taken = roles.some((item) => item.name.toLowerCase() === name.toLowerCase() && item.id !== role?.id)
+        return taken ? 'That role name is already used' : null
+      },
+    },
   })
 
   useEffect(() => {
     if (!opened) return
-    form.setValues(role ? { ...role } : empty)
+    form.setValues(
+      role
+        ? { name: role.name, description: role.description, status: role.status, isAdmin: role.isAdmin, permissions: role.permissions }
+        : empty,
+    )
     form.resetDirty()
+    form.clearErrors()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, role])
 
-  if (!user) return null
-
-  const lockedAdmin = role?.system === true && role.kind === 'admin'
-  const modules = form.values.kind === 'admin' ? [...commonModules, ...adminModules] : commonModules
+  // An administrator role keeps full access so the building can never be locked out.
+  const lockedAdmin = role?.system === true
 
   const toggle = (module: PermissionModule, action: PermissionAction, checked: boolean) => {
     const current = form.values.permissions[module] ?? []
     let next = checked ? [...new Set([...current, action])] : current.filter((item) => item !== action)
-    // Any action implies the module can be opened.
+    // Any action implies the module can be opened; removing View removes everything.
     if (checked && action !== 'view') next = [...new Set([...next, 'view' as const])]
     if (!checked && action === 'view') next = []
     form.setFieldValue('permissions', { ...form.values.permissions, [module]: next })
   }
 
-  const save = (values: RoleFormValues) => {
-    // Admin modules never apply to owner or tenant roles.
-    const permissions: PermissionSet =
-      values.kind === 'admin'
-        ? values.permissions
-        : Object.fromEntries(commonModules.map((module) => [module, values.permissions[module] ?? []]))
-    const done = notifyResult(
-      saveRole(
-        {
-          id: role?.id ?? `role-${crypto.randomUUID()}`,
-          system: role?.system ?? false,
-          name: values.name,
-          description: values.description,
-          status: values.status,
-          kind: values.kind,
-          permissions,
-        },
-        user.name,
-      ),
-      { title: role ? 'Role updated' : 'Role created', message: values.name.trim() },
-    )
-    if (done) onClose()
+  const save = async (values: RoleFormValues) => {
+    // Resident roles only use the common modules.
+    const permissions: PermissionSet = Object.fromEntries(commonModules.map((module) => [module, values.permissions[module] ?? []]))
+    if (!values.isAdmin && Object.values(permissions).every((actions) => !actions || actions.length === 0)) {
+      form.setFieldError('permissions', 'Give the role at least one module, or its users cannot sign in.')
+      return
+    }
+    const input = { ...values, permissions }
+    setSaving(true)
+    try {
+      if (role) await updateRole(role.id, input)
+      else await createRole(input)
+      notifySuccess(role ? 'Role updated' : 'Role created', values.name.trim())
+      onSaved()
+      onClose()
+    } catch (failure) {
+      notifyApiError(failure)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <Modal opened={opened} onClose={onClose} title={role ? `Edit role · ${role.name}` : 'Create role'} size="xl">
-      <form onSubmit={form.onSubmit(save)}>
+      <form onSubmit={form.onSubmit((values) => void save(values))}>
         <Stack gap="sm">
           <SimpleGrid cols={{ base: 1, sm: 2 }}>
             <TextInput label="Role name" required {...form.getInputProps('name')} />
@@ -94,66 +113,71 @@ export function RoleForm({ opened, role, onClose }: { opened: boolean; role: App
             />
           </SimpleGrid>
           <Textarea label="Role description" autosize minRows={2} {...form.getInputProps('description')} />
-          <Select
-            label="Access level"
-            description="Decides what the user is linked to and which personal records they can see."
-            required
-            allowDeselect={false}
-            disabled={role?.system === true}
-            data={(['admin', 'owner', 'tenant'] as Role[]).map((kind) => ({ value: kind, label: kindLabels[kind] }))}
-            {...form.getInputProps('kind')}
+          <Switch
+            label="Administrator role"
+            description="Administrators get every module and action and are not linked to a flat. Leave off for owner and tenant roles."
+            disabled={lockedAdmin}
+            checked={form.values.isAdmin}
+            onChange={(event) => form.setFieldValue('isAdmin', event.currentTarget.checked)}
           />
           <Text fw={700} mt="xs">
             Module permissions
           </Text>
-          {lockedAdmin ? (
+          {form.values.isAdmin ? (
             <Alert color="terracotta" variant="light">
-              The Admin role always has every module and action, so the building can never be locked out.
+              An administrator role always has every module and action.
             </Alert>
-          ) : form.values.kind !== 'admin' ? (
-            <Text size="xs" c="dimmed">
-              Owner and tenant roles only use the common modules. Edit lets them change their own expenses; Manage and Delete
-              are for the admin.
-            </Text>
-          ) : null}
-          <Table.ScrollContainer minWidth={560}>
-            <Table striped verticalSpacing={6}>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Module</Table.Th>
-                  {allActions.map((action) => (
-                    <Table.Th key={action} ta="center">
-                      {actionLabels[action]}
-                    </Table.Th>
-                  ))}
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {modules.map((module) => (
-                  <Table.Tr key={module}>
-                    <Table.Td>{moduleLabels[module]}</Table.Td>
-                    {allActions.map((action) => (
-                      <Table.Td key={action}>
-                        <Group justify="center">
-                          <Checkbox
-                            aria-label={`${moduleLabels[module]}: ${actionLabels[action]}`}
-                            disabled={lockedAdmin}
-                            checked={hasPermission(form.values.permissions, module, action)}
-                            onChange={(event) => toggle(module, action, event.currentTarget.checked)}
-                          />
-                        </Group>
-                      </Table.Td>
+          ) : (
+            <>
+              <Text size="xs" c="dimmed">
+                Resident roles use the common modules. Edit lets them change their own expenses; delete stays with the admin.
+              </Text>
+              {typeof form.errors.permissions === 'string' ? (
+                <Text size="sm" c="red">
+                  {form.errors.permissions}
+                </Text>
+              ) : null}
+              <Table.ScrollContainer minWidth={480}>
+                <Table striped verticalSpacing={6}>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Module</Table.Th>
+                      {roleActions.map((action) => (
+                        <Table.Th key={action} ta="center">
+                          {actionLabels[action]}
+                        </Table.Th>
+                      ))}
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {commonModules.map((module) => (
+                      <Table.Tr key={module}>
+                        <Table.Td>{moduleLabels[module]}</Table.Td>
+                        {roleActions.map((action) => (
+                          <Table.Td key={action}>
+                            <Group justify="center">
+                              <Checkbox
+                                aria-label={`${moduleLabels[module]}: ${actionLabels[action]}`}
+                                checked={hasPermission(form.values.permissions, module, action)}
+                                onChange={(event) => toggle(module, action, event.currentTarget.checked)}
+                              />
+                            </Group>
+                          </Table.Td>
+                        ))}
+                      </Table.Tr>
                     ))}
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            </>
+          )}
           <Group justify="flex-end">
-            <Button variant="default" onClick={onClose}>
+            <Button variant="default" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit">{role ? 'Save role' : 'Create role'}</Button>
+            <Button type="submit" loading={saving}>
+              {role ? 'Save role' : 'Create role'}
+            </Button>
           </Group>
         </Stack>
       </form>

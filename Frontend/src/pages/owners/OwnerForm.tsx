@@ -1,11 +1,10 @@
 import { Alert, Button, Group, Modal, Select, SimpleGrid, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
-import { useEffect } from 'react'
-import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import type { Owner } from '../../types/models.ts'
+import { useEffect, useState } from 'react'
+import { createOwner, updateOwner } from '../../services/ownerService.ts'
+import type { Building, Flat, Owner } from '../../types/models.ts'
 import { ownerOf, sortByFlatNumber } from '../../utils/calculations.ts'
-import { notifyResult } from '../../utils/notify.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 
 const NONE = 'none'
 
@@ -21,13 +20,29 @@ interface OwnerFormValues {
 
 const empty: OwnerFormValues = { name: '', phone: '', email: '', flatId: NONE, livesInFlat: false, address: '', emergency: '' }
 
-export function OwnerForm({ opened, owner, onClose }: { opened: boolean; owner: Owner | null; onClose: () => void }) {
-  const { user } = useAuth()
-  const { flats, owners, building, saveOwner } = useBuilding()
+export function OwnerForm({
+  opened,
+  owner,
+  owners,
+  flats,
+  building,
+  onClose,
+  onSaved,
+}: {
+  opened: boolean
+  owner: Owner | null
+  owners: Owner[]
+  flats: Flat[]
+  building: Building
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [saving, setSaving] = useState(false)
 
   const flatAddress = (flatId: string) => {
     const flat = flats.find((item) => item.id === flatId)
-    return flat ? `Flat ${flat.number}, ${building.name}, ${building.address}` : ''
+    if (!flat) return ''
+    return [`Flat ${flat.number}`, building.name, building.address].filter((part) => part.trim()).join(', ')
   }
 
   const form = useForm<OwnerFormValues>({
@@ -53,10 +68,9 @@ export function OwnerForm({ opened, owner, onClose }: { opened: boolean; owner: 
         : empty,
     )
     form.resetDirty()
+    form.clearErrors()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, owner])
-
-  if (!user) return null
 
   // The flat is assigned here. Once linked it stays fixed, because a flat must never be left without its owner;
   // ownership moves by giving the flat to the new owner, which releases the previous one.
@@ -86,32 +100,36 @@ export function OwnerForm({ opened, owner, onClose }: { opened: boolean; owner: 
     if (checked && form.values.flatId !== NONE) form.setFieldValue('address', flatAddress(form.values.flatId))
   }
 
-  const save = (values: OwnerFormValues) => {
+  const save = async (values: OwnerFormValues) => {
     const flatId = values.flatId === NONE ? null : values.flatId
-    const done = notifyResult(
-      saveOwner(
-        {
-          id: owner?.id ?? `owner-${crypto.randomUUID()}`,
-          name: values.name,
-          phone: values.phone,
-          email: values.email,
-          flatId,
-          address: values.livesInFlat && flatId ? flatAddress(flatId) : values.address,
-          emergency: values.emergency,
-        },
-        user.name,
-      ),
-      {
-        title: transferFrom ? 'Ownership transferred' : owner ? 'Owner updated' : 'Owner added',
-        message: transferFrom ? `${transferFrom.name} → ${values.name.trim()}` : values.name.trim(),
-      },
-    )
-    if (done) onClose()
+    const input = {
+      name: values.name,
+      phone: values.phone,
+      email: values.email,
+      flatId,
+      address: values.livesInFlat && flatId ? flatAddress(flatId) : values.address,
+      emergency: values.emergency,
+    }
+    setSaving(true)
+    try {
+      if (owner) await updateOwner(owner.id, input)
+      else await createOwner(input)
+      notifySuccess(
+        transferFrom ? 'Ownership transferred' : owner ? 'Owner updated' : 'Owner added',
+        transferFrom ? `${transferFrom.name} → ${values.name.trim()}` : values.name.trim(),
+      )
+      onSaved()
+      onClose()
+    } catch (failure) {
+      notifyApiError(failure)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <Modal opened={opened} onClose={onClose} title={owner ? 'Edit owner' : 'Add owner'} size="lg">
-      <form onSubmit={form.onSubmit(save)}>
+      <form onSubmit={form.onSubmit((values) => void save(values))}>
         <Stack gap="sm">
           <TextInput label="Owner name" required {...form.getInputProps('name')} />
           <SimpleGrid cols={{ base: 1, sm: 2 }}>
@@ -157,10 +175,12 @@ export function OwnerForm({ opened, owner, onClose }: { opened: boolean; owner: 
           />
           <TextInput label="Emergency contact" required placeholder="Name · phone" {...form.getInputProps('emergency')} />
           <Group justify="flex-end">
-            <Button variant="default" onClick={onClose}>
+            <Button variant="default" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit">{owner ? 'Save owner' : 'Add owner'}</Button>
+            <Button type="submit" loading={saving}>
+              {owner ? 'Save owner' : 'Add owner'}
+            </Button>
           </Group>
         </Stack>
       </form>

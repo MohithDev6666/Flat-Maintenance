@@ -14,7 +14,7 @@ export type IdProofType = 'Aadhaar' | 'PAN' | 'Passport' | 'Driving licence' | '
 
 export const idProofTypes: IdProofType[] = ['Aadhaar', 'PAN', 'Passport', 'Driving licence', 'Voter ID']
 
-/** A bill, screenshot, or ID proof. `url` is null for seeded sample files that have no content. */
+/** A bill, screenshot, or ID proof. `url` is a data URL saved with the record (null when no content was kept). */
 export interface Attachment {
   name: string
   url: string | null
@@ -99,21 +99,34 @@ export interface AppRole {
   name: string
   description: string
   status: RecordStatus
-  kind: Role
-  /** Admin, Owner, and Tenant ship with the app and cannot be deleted. */
+  /** Administrator roles get every module and action and are not linked to a flat. */
+  isAdmin: boolean
+  /** The seeded Super Admin role (or any admin-level role) cannot be deleted or narrowed. */
   system: boolean
   permissions: PermissionSet
 }
 
+/** A login account: the RBAC user plus its owner / tenant profile link. */
 export interface UserAccount {
   id: string
   name: string
   email: string
-  password: string
+  phone: string
   roleId: string
+  roleName: string
+  isAdmin: boolean
   ownerId: string | null
   tenantId: string | null
   status: RecordStatus
+}
+
+/** Links a login to the owner or tenant record it acts for. */
+export interface ProfileLink {
+  userId: string
+  kind: Role
+  ownerId?: string
+  tenantId?: string
+  roleId: string
 }
 
 /** The signed-in user, resolved from the account, its role, and its resident record. */
@@ -157,6 +170,11 @@ export interface Expense {
 
 export type PayStatus = 'Unpaid' | 'Partial' | 'Paid'
 
+export type PaymentStatus = 'Pending' | 'Verified'
+
+/** A payment's review state: waiting for the admin, counted, or sent back with a note. */
+export type PaymentVerification = 'Pending verification' | 'Verified' | 'Needs check'
+
 export interface Payment {
   id: string
   userId: string
@@ -171,6 +189,8 @@ export interface Payment {
   reference: string
   screenshot: Attachment
   needsCheck: boolean
+  /** Pending until an admin verifies a resident's upload. Only verified payments count as paid. */
+  status: PaymentStatus
   checkNote: string
 }
 
@@ -195,6 +215,15 @@ export interface AuditEntry {
   description: string
   oldValue: string
   newValue: string
+  /** Field-by-field difference, decoded by the backend from the old and new values. */
+  changes: AuditChange[]
+}
+
+export interface AuditChange {
+  field: string
+  label: string
+  old: string
+  new: string
 }
 
 export interface MonthLock {

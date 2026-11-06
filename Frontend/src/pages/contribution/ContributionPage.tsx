@@ -1,47 +1,80 @@
 import { Card, Divider, Group, Select, SimpleGrid, Stack, Table, Text } from '@mantine/core'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { EmptyState } from '../../components/common/EmptyState.tsx'
 import { DownloadBar } from '../../components/ui/DownloadBar.tsx'
 import { PageHeading } from '../../components/ui/PageHeading.tsx'
 import { StatCard } from '../../components/ui/StatCard.tsx'
 import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import { calendar } from '../../mocks/calendar.ts'
-import { downloadPdf } from '../../utils/download.ts'
-import { formatDate, formatINR, formatMonth } from '../../utils/format.ts'
-import {
-  allParties,
-  buildMonthLedger,
-  listMonths,
-  monthOf,
-  partyForUser,
-  partyHistory,
-  userIdsFor,
-  type Party,
-} from '../../utils/calculations.ts'
+import { LoadState } from '../../components/common/LoadState.tsx'
+import { getErrorMessage } from '../../services/apiClient.ts'
+import { getBuilding } from '../../services/buildingService.ts'
+import { getContributionReport, type ContributionReport } from '../../services/reportService.ts'
+import type { Building } from '../../types/models.ts'
+import { calendar } from '../../utils/calendar.ts'
+import { can } from '../../utils/permissions.ts'
+import { formatDate, formatINR, formatMonth, formatPhone } from '../../utils/format.ts'
+import { downloadReportPdf, type PdfLetterhead } from '../../utils/pdfReport.ts'
 
 const BUILDING = 'building'
 
-function partyKey(party: Party): string {
-  return `${party.kind}:${party.residentId}`
-}
-
 export function ContributionPage() {
   const { user } = useAuth()
-  const { building, expenses, flats, owners, tenants, accounts, payments } = useBuilding()
+  const [report, setReport] = useState<ContributionReport | null>(null)
+  const [buildingName, setBuildingName] = useState('')
+  const [buildingInfo, setBuildingInfo] = useState<Building | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [month, setMonth] = useState<string>(calendar.currentMonth)
   const [inspect, setInspect] = useState<string>(BUILDING)
+
+  // Shares, credit, payments, arrears and balances are all calculated by the backend.
+  const load = useCallback(async () => {
+    if (!user) return
+    try {
+      const [data, building] = await Promise.all([
+        getContributionReport(month, inspect === BUILDING ? '' : inspect),
+        can(user, 'building', 'view') ? getBuilding().catch(() => null) : Promise.resolve(null),
+      ])
+      setReport(data)
+      setBuildingName(building?.name ?? '')
+      setBuildingInfo(building)
+      setError(null)
+    } catch (failure) {
+      setError(getErrorMessage(failure))
+    } finally {
+      setLoading(false)
+    }
+  }, [user, month, inspect])
+
+  useEffect(() => {
+    void load()
+  }, [load])
   if (!user) return null
 
-  const data = { flats, owners, tenants, accounts }
-  const flatNumber = (flatId: string | null) => flats.find((flat) => flat.id === flatId)?.number ?? '—'
-  const parties = user.role === 'admin' ? allParties(data) : []
-  const party = user.role === 'admin' ? (parties.find((item) => partyKey(item) === inspect) ?? null) : partyForUser(user, data)
-  const months = listMonths(expenses)
-  const monthOptions = months
-    .slice()
-    .reverse()
-    .map((value) => ({ value, label: formatMonth(value) }))
+  if (!report || error) {
+    return (
+      <Stack gap="lg">
+        <PageHeading title="My Contribution" />
+        <LoadState loading={loading} error={error} onRetry={load}>
+          {null}
+        </LoadState>
+      </Stack>
+    )
+  }
+
+  const building = { name: buildingName || 'Flat Maintenance' }
+  const letterhead: PdfLetterhead = {
+    name: building.name,
+    address: buildingInfo?.address,
+    phone: buildingInfo?.contactPhone ? formatPhone(buildingInfo.contactPhone) : undefined,
+  }
+
+  const flats = { length: report.flatCount }
+  const parties = report.parties
+  const party = report.party
+  // Oldest first, like the month-by-month tables.
+  const months = report.months.map((option) => option.month).reverse()
+  const monthOptions = report.months.map((option) => ({ value: option.month, label: formatMonth(option.month) }))
 
   const adminPicker =
     user.role === 'admin' ? (
@@ -54,16 +87,18 @@ export function ContributionPage() {
         data={[
           { value: BUILDING, label: 'Building totals' },
           ...parties.map((item) => ({
-            value: partyKey(item),
-            label: `Flat ${flatNumber(item.flatId)} · ${item.kind === 'owner' ? 'Owner' : 'Tenant'} · ${item.name}`,
+            value: item.key,
+            label: `Flat ${item.flatNumber || '—'} · ${item.kind === 'owner' ? 'Owner' : 'Tenant'} · ${item.name}`,
           })),
         ]}
       />
     ) : null
 
-  if (!party) {
-    const buildingRows = months.map((value) => buildMonthLedger(expenses, data, value))
-    const yearTotal = buildingRows.reduce((sum, row) => sum + row.total, 0)
+  if (!party || !report.statement) {
+    const buildingRows = report.building?.rows ?? []
+    const yearTotal = report.building?.total ?? 0
+    const ownerPoolTotal = report.building?.ownerPool ?? 0
+    const tenantPoolTotal = report.building?.tenantPool ?? 0
     return (
       <Stack gap="lg">
         <PageHeading
@@ -76,14 +111,57 @@ export function ContributionPage() {
           action={
             <DownloadBar
               onPdf={() =>
-                downloadPdf(`contribution-building.pdf`, [
-                  building.name,
-                  'Building totals',
-                  ...buildingRows.map(
-                    (row) =>
-                      `${formatMonth(row.month)} total ${formatINR(row.total)} owner ${formatINR(row.ownerPool)} tenant ${formatINR(row.tenantPool)}`,
-                  ),
-                ])
+                downloadReportPdf({
+                  filename: 'contribution-building.pdf',
+                  title: 'Contribution Report',
+                  subtitle: 'Building totals',
+                  letterhead,
+                  details: [
+                    { label: 'Report', value: 'Building totals' },
+                    { label: 'Flats', value: String(flats.length) },
+                    {
+                      label: 'Period',
+                      value: months.length
+                        ? `${formatMonth(months[0])} to ${formatMonth(months[months.length - 1])}`
+                        : 'No expenses recorded',
+                    },
+                    { label: 'Months recorded', value: String(months.length) },
+                  ],
+                  sections: [
+                    {
+                      type: 'stats',
+                      heading: 'Overview',
+                      items: [
+                        { label: 'Total expenses', value: formatINR(yearTotal), hint: 'Sum of every recorded month' },
+                        { label: 'Owner pool', value: formatINR(ownerPoolTotal) },
+                        { label: 'Tenant pool', value: formatINR(tenantPoolTotal) },
+                      ],
+                    },
+                    {
+                      type: 'table',
+                      heading: 'Month-wise totals',
+                      columns: [
+                        { header: 'Month', width: 2 },
+                        { header: 'Total', width: 1.5, align: 'right' },
+                        { header: 'Owner pool', width: 1.5, align: 'right' },
+                        { header: 'Tenant pool', width: 1.5, align: 'right' },
+                      ],
+                      rows: buildingRows.map((row) => [
+                        formatMonth(row.month),
+                        formatINR(row.total),
+                        formatINR(row.ownerPool),
+                        formatINR(row.tenantPool),
+                      ]),
+                      footer: [
+                        'Total',
+                        formatINR(yearTotal),
+                        formatINR(ownerPoolTotal),
+                        formatINR(tenantPoolTotal),
+                      ],
+                      emptyText: 'No expenses recorded yet',
+                    },
+                  ],
+                })
               }
             />
           }
@@ -118,21 +196,11 @@ export function ContributionPage() {
     )
   }
 
-  const history = partyHistory(party, expenses, data, payments)
-  const selected = history.find((row) => row.month === month) ?? history[history.length - 1]
-  const yearRows = history.filter((row) => row.month.slice(0, 4) === month.slice(0, 4) && row.month <= month)
-  const yearShare = yearRows.reduce((sum, row) => sum + row.due, 0)
-  const yearCredit = yearRows.reduce((sum, row) => sum + row.credit, 0)
-  const yearPaid = yearRows.reduce((sum, row) => sum + row.paidToBuilding, 0)
-  const userIds = userIdsFor(accounts, party.kind, party.residentId)
-  const pocket = expenses.filter(
-    (expense) => monthOf(expense.date) === month && expense.paidByUserId && userIds.includes(expense.paidByUserId),
-  )
-  const paidIn = payments.filter(
-    (payment) => payment.month === month && payment.role === party.kind && payment.residentId === party.residentId,
-  )
+  const { history, selected, pocket, payments: paidIn } = report.statement
+  const { share: yearShare, credit: yearCredit, paid: yearPaid } = report.statement.yearToDate
+  const flatNumber = () => party.flatNumber || '—'
   const owed = selected ? selected.owedToYou > 0 : false
-  const who = `${party.name} · Flat ${flatNumber(party.flatId)} ${party.kind === 'owner' ? 'owner' : 'tenant'}`
+  const who = `${party.name} · Flat ${flatNumber()} ${party.kind === 'owner' ? 'owner' : 'tenant'}`
 
   return (
     <Stack gap="lg">
@@ -146,17 +214,118 @@ export function ContributionPage() {
         action={
           <DownloadBar
             onPdf={() =>
-              downloadPdf(`contribution-${party.residentId}.pdf`, [
-                building.name,
-                who,
-                ...history.map(
-                  (row) =>
-                    `${formatMonth(row.month)} share ${formatINR(row.due)} pocket ${formatINR(row.credit)} paid ${formatINR(row.paidToBuilding)} balance ${row.owedToYou > 0 ? `owed to you ${formatINR(row.owedToYou)}` : formatINR(row.balance)}`,
-                ),
-                `Year to date share ${formatINR(yearShare)}`,
-                `Year to date out of pocket ${formatINR(yearCredit)}`,
-                `Year to date paid to building ${formatINR(yearPaid)}`,
-              ])
+              downloadReportPdf({
+                filename: `contribution-${party.residentId}.pdf`,
+                title: 'Contribution Statement',
+                subtitle: formatMonth(month),
+                letterhead,
+                details: [
+                  { label: 'Resident', value: party.name },
+                  { label: 'Flat', value: `Flat ${flatNumber()}` },
+                  { label: 'Resident type', value: party.kind === 'owner' ? 'Owner' : 'Tenant' },
+                  { label: 'Statement month', value: formatMonth(month) },
+                ],
+                sections: [
+                  ...(selected
+                    ? [
+                        {
+                          type: 'stats' as const,
+                          heading: `This month · ${formatMonth(selected.month)}`,
+                          items: [
+                            { label: 'Opening arrears', value: formatINR(selected.arrears), hint: 'Carried from last month' },
+                            { label: 'Current due', value: formatINR(selected.due), hint: formatMonth(selected.month) },
+                            { label: 'Out-of-pocket credit', value: formatINR(selected.credit), hint: 'Expenses paid personally' },
+                            { label: 'Paid to building', value: formatINR(selected.paidToBuilding), hint: 'Payments this month' },
+                            {
+                              label: owed ? 'Owed to resident' : 'Outstanding',
+                              value: formatINR(owed ? selected.owedToYou : selected.balance),
+                              hint: owed ? 'Credit is above the due' : 'Carries forward as arrears',
+                            },
+                          ],
+                        },
+                      ]
+                    : []),
+                  {
+                    type: 'stats',
+                    heading: `Year to date · through ${formatMonth(month)}`,
+                    items: [
+                      { label: 'Share', value: formatINR(yearShare) },
+                      { label: 'Out of pocket', value: formatINR(yearCredit) },
+                      { label: 'Paid to building', value: formatINR(yearPaid) },
+                    ],
+                  },
+                  {
+                    type: 'table',
+                    heading: `Out-of-pocket expenses · ${formatMonth(month)}`,
+                    columns: [
+                      { header: 'Date', width: 1.2 },
+                      { header: 'Category', width: 2 },
+                      { header: 'Description', width: 3 },
+                      { header: 'Mode', width: 1.2 },
+                      { header: 'Amount', width: 1.5, align: 'right' },
+                    ],
+                    rows: pocket.map((expense) => [
+                      formatDate(expense.date),
+                      expense.category,
+                      expense.description || '—',
+                      expense.paymentMode,
+                      formatINR(expense.amount),
+                    ]),
+                    footer: pocket.length
+                      ? ['Total', '', '', '', formatINR(pocket.reduce((sum, expense) => sum + expense.amount, 0))]
+                      : undefined,
+                    emptyText: 'None this month',
+                  },
+                  {
+                    type: 'table',
+                    heading: `Payments · ${formatMonth(month)}`,
+                    columns: [
+                      { header: 'Date', width: 1.2 },
+                      { header: 'Mode', width: 1.2 },
+                      { header: 'Reference', width: 3.2 },
+                      { header: 'Status', width: 1.8 },
+                      { header: 'Amount', width: 1.5, align: 'right' },
+                    ],
+                    rows: paidIn.map((payment) => [
+                      formatDate(payment.date),
+                      payment.mode,
+                      payment.reference || payment.screenshot.name || '—',
+                      payment.checkNote ? `${payment.verification} · ${payment.checkNote}` : payment.verification,
+                      formatINR(payment.amount),
+                    ]),
+                    footer: selected
+                      ? ['Verified paid', '', '', '', formatINR(selected.paidToBuilding)]
+                      : undefined,
+                    emptyText: 'No payments this month',
+                  },
+                  {
+                    type: 'table',
+                    heading: 'Monthly history',
+                    columns: [
+                      { header: 'Month', width: 1.7 },
+                      { header: 'Responsibility share', width: 1.5, align: 'right' },
+                      { header: 'Paid out of pocket', width: 1.5, align: 'right' },
+                      { header: 'Paid to building', width: 1.5, align: 'right' },
+                      { header: 'Arrears in', width: 1.4, align: 'right' },
+                      { header: 'Balance', width: 1.8, align: 'right' },
+                    ],
+                    rows: history.map((row) => [
+                      formatMonth(row.month),
+                      formatINR(row.due),
+                      formatINR(row.credit),
+                      formatINR(row.paidToBuilding),
+                      formatINR(row.arrears),
+                      row.owedToYou > 0 ? `Owed ${formatINR(row.owedToYou)}` : formatINR(row.balance),
+                    ]),
+                    emptyText: 'No history yet',
+                  },
+                  {
+                    type: 'note',
+                    heading: 'Notes',
+                    text: 'A month’s unpaid balance becomes next month’s arrears. Money paid to the building reduces that balance. Credit above the due stays on that month as “Owed to resident”.',
+                  },
+                ],
+              })
             }
           />
         }
@@ -174,7 +343,15 @@ export function ContributionPage() {
           <StatCard label="Opening arrears" value={formatINR(selected.arrears)} hint="Carried from last month" />
           <StatCard label="Current due" value={formatINR(selected.due)} hint={formatMonth(selected.month)} />
           <StatCard label="Out-of-pocket credit" value={formatINR(selected.credit)} hint="Expenses you paid" />
-          <StatCard label="Paid to building" value={formatINR(selected.paidToBuilding)} hint="Payments this month" />
+          <StatCard
+            label="Paid to building"
+            value={formatINR(selected.paidToBuilding)}
+            hint={
+              selected.pendingVerification > 0
+                ? `Verified · ${formatINR(selected.pendingVerification)} awaiting verification`
+                : 'Verified payments this month'
+            }
+          />
           <StatCard
             label={owed ? 'Owed to you' : 'Outstanding'}
             value={formatINR(owed ? selected.owedToYou : selected.balance)}
@@ -234,8 +411,16 @@ export function ContributionPage() {
                       <Text size="sm" fw={600}>
                         {formatDate(payment.date)} · {payment.mode}
                       </Text>
-                      <Text size="xs" c={payment.needsCheck ? 'red.8' : 'dimmed'}>
-                        {payment.needsCheck ? `Needs check · ${payment.checkNote}` : payment.reference || payment.screenshot.name}
+                      <Text size="xs" c="dimmed">
+                        {payment.reference || payment.screenshot.name}
+                      </Text>
+                      <Text
+                        size="xs"
+                        fw={600}
+                        c={payment.verification === 'Needs check' ? 'red.8' : payment.verification === 'Verified' ? 'teal.8' : 'orange.8'}
+                      >
+                        {payment.verification}
+                        {payment.checkNote ? ` · ${payment.checkNote}` : ''}
                       </Text>
                     </div>
                     <Text fw={700}>{formatINR(payment.amount)}</Text>

@@ -63,7 +63,7 @@ import (
 	userlinkservice "github.com/trideadmin/flat-maintenance/backend/internal/modules/userlinks/service"
 )
 
-func SetUpProtectedRoutes(r *gin.RouterGroup, client *mongo.Client, Database string, require func(string) gin.HandlerFunc) {
+func SetUpProtectedRoutes(r *gin.RouterGroup, client *mongo.Client, Database string, require func(string) gin.HandlerFunc, requireAny func(...string) gin.HandlerFunc) {
 	// Repositories
 	auditRepo := auditrepo.NewMongoAuditRepo(client, Database)
 	buildingRepo := buildingrepo.NewMongoBuildingRepo(client, Database)
@@ -88,22 +88,21 @@ func SetUpProtectedRoutes(r *gin.RouterGroup, client *mongo.Client, Database str
 	flatManagementHandler := flatmanagementhandler.NewFlatManagementHandler(flatService)
 	flatmanagementroute.SetupFlatManagementRoutes(r.Group("/flat-management"), flatManagementHandler, require)
 
-	
 	buildingService := buildingservice.NewBuildingService(buildingRepo, auditRepo)
 	buildingHandler := buildinghandler.NewBuildingHandler(buildingService)
 	buildingroute.SetupBuildingRoutes(r.Group("/building"), buildingHandler, require)
 
 	ownerService := ownerservice.NewOwnerService(ownerRepo, flatRepo, paymentRepo, userLinkRepo, auditRepo)
 	ownerHandler := ownerhandler.NewOwnersHandler(ownerService)
-	ownerroute.SetupOwnerRoutes(r.Group("/owners"), ownerHandler, require)
+	ownerroute.SetupOwnerRoutes(r.Group("/owners"), ownerHandler, require, requireAny)
 
 	tenantService := tenantservice.NewTenantService(tenantRepo, flatRepo, paymentRepo, userLinkRepo, auditRepo)
 	tenantHandler := tenanthandler.NewTenantsHandler(tenantService)
-	tenantroute.SetupTenantRoutes(r.Group("/tenants"), tenantHandler, require)
+	tenantroute.SetupTenantRoutes(r.Group("/tenants"), tenantHandler, require, requireAny)
 
 	categoryService := categoryservice.NewCategoryService(categoryRepo, expenseRepo, auditRepo)
 	categoryHandler := categoryhandler.NewCategoriesHandler(categoryService)
-	categoryroute.SetupCategoryRoutes(r.Group("/categories"), categoryHandler, require)
+	categoryroute.SetupCategoryRoutes(r.Group("/categories"), categoryHandler, require, requireAny)
 
 	expenseService := expenseservice.NewExpenseService(expenseRepo, categoryRepo, monthLockRepo, ownerRepo, tenantRepo, auditRepo)
 	expenseHandler := expensehandler.NewExpensesHandler(expenseService, userLinkService)
@@ -113,15 +112,15 @@ func SetUpProtectedRoutes(r *gin.RouterGroup, client *mongo.Client, Database str
 	paymentHandler := paymenthandler.NewPaymentsHandler(paymentService, userLinkService)
 	paymentroute.SetupPaymentRoutes(r.Group("/payments"), paymentHandler, require)
 
-	auditService := auditservice.NewAuditService(auditRepo)
+	auditService := auditservice.NewAuditService(auditRepo, flatRepo, ownerRepo, tenantRepo)
 	auditHandler := audithandler.NewAuditHandler(auditService)
 	auditroute.SetupAuditRoutes(r.Group("/audit"), auditHandler, require)
 
 	monthLockService := monthlockservice.NewMonthLockService(monthLockRepo, auditRepo)
 	monthLockHandler := monthlockhandler.NewMonthLocksHandler(monthLockService)
-	monthlockroute.SetupMonthLockRoutes(r.Group("/month-locks"), monthLockHandler, require)
+	monthlockroute.SetupMonthLockRoutes(r.Group("/month-locks"), monthLockHandler, require, requireAny)
 
 	reportService := reportservice.NewReportService(reportRepo)
-	reportHandler := reporthandler.NewReportHandler(reportService)
+	reportHandler := reporthandler.NewReportHandler(reportService, userLinkService)
 	reportroute.SetupReportRoutes(r, reportHandler, require)
 }

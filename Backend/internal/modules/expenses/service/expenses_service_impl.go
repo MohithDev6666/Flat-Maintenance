@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -152,6 +153,8 @@ func (es *expenseServiceImpl) prepare(ctx context.Context, expense *models.Expen
 			return utils.BadRequest(field.name + " is required")
 		}
 	}
+	// Rupees and paise: keep exactly two decimal places so the per-flat split is exact.
+	expense.Amount = math.Round(expense.Amount*100) / 100
 	if expense.Amount <= 0 {
 		return utils.BadRequest("amount must be greater than zero")
 	}

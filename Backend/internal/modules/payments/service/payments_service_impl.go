@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -84,6 +85,8 @@ func (ps *paymentServiceImpl) UpdatePayment(ctx context.Context, actor, id strin
 		return nil, err
 	}
 	payment.ID, payment.CreatedAt, payment.UpdatedAt = id, old.CreatedAt, time.Now().UTC()
+	// Verification only changes through review (flag / mark as checked), never through an edit.
+	payment.Status, payment.NeedsCheck, payment.CheckNote = old.Status, old.NeedsCheck, old.CheckNote
 	if err := ps.paymentRepo.UpdatePayment(ctx, payment); err != nil {
 		return nil, err
 	}
@@ -117,7 +120,7 @@ func (ps *paymentServiceImpl) SetPaymentFlag(ctx context.Context, actor, id stri
 	if err := ps.ensureMonthOpen(ctx, old.Month); err != nil {
 		return nil, err
 	}
-	action := "Checked"
+	action := "Verified"
 	if flagged {
 		action = "Flagged"
 	} else {
@@ -126,6 +129,10 @@ func (ps *paymentServiceImpl) SetPaymentFlag(ctx context.Context, actor, id stri
 	next := *old
 	next.NeedsCheck = flagged
 	next.CheckNote = strings.TrimSpace(note)
+	if !flagged {
+		// Marking a payment as checked verifies it, so it now counts towards what was paid.
+		next.Status = models.PaymentVerified
+	}
 	next.UpdatedAt = time.Now().UTC()
 	if err := ps.paymentRepo.UpdatePayment(ctx, &next); err != nil {
 		return nil, err
@@ -214,14 +221,19 @@ func (ps *paymentServiceImpl) prepare(ctx context.Context, payment *models.Payme
 			return utils.BadRequest(field.name + " is required")
 		}
 	}
+	// Rupees and paise: keep exactly two decimal places.
+	payment.Amount = math.Round(payment.Amount*100) / 100
 	if payment.Amount <= 0 {
 		return utils.BadRequest("amount must be greater than zero")
 	}
 	if payment.Mode != "Cash" && payment.Reference == "" {
 		return utils.BadRequest("reference is required for non-cash payments")
 	}
-	if !utils.OneOf(payment.Role, "owner", "tenant") || !utils.OneOf(payment.Mode, "Cash", "UPI", "Bank") {
+	if !utils.OneOf(payment.Role, "owner", "tenant") {
 		return utils.BadRequest("role must be owner or tenant")
+	}
+	if !utils.OneOf(payment.Mode, "Cash", "UPI", "Bank") {
+		return utils.BadRequest("mode must be Cash, UPI or Bank")
 	}
 	if strings.TrimSpace(payment.Screenshot.Name) == "" || !utils.OneOf(payment.Screenshot.Kind, "image", "pdf") {
 		return utils.BadRequest("screenshot is required")

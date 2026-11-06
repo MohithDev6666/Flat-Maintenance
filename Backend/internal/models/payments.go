@@ -17,8 +17,38 @@ type Payment struct {
 	Screenshot Attachment `json:"screenshot" bson:"screenshot"`
 	NeedsCheck bool       `json:"needsCheck" bson:"needsCheck"`
 	CheckNote  string     `json:"checkNote" bson:"checkNote"`
-	CreatedAt  time.Time  `json:"createdAt,omitzero" bson:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt,omitzero" bson:"updatedAt"`
+	// Status is Pending until an admin verifies a resident's upload; admin-recorded payments start Verified.
+	// Records saved before verification existed have no status and count as Verified.
+	Status    string    `json:"status" bson:"status"`
+	CreatedAt time.Time `json:"createdAt,omitzero" bson:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt,omitzero" bson:"updatedAt"`
+}
+
+const (
+	PaymentPending  = "Pending"
+	PaymentVerified = "Verified"
+)
+
+// CountsAsPaid reports whether the payment reduces what the resident owes:
+// verified (or saved before verification existed) and not flagged as needing a check.
+func (p *Payment) CountsAsPaid() bool {
+	return !p.NeedsCheck && p.Status != PaymentPending
+}
+
+// AwaitingVerification reports whether an admin still has to verify the payment.
+func (p *Payment) AwaitingVerification() bool {
+	return !p.NeedsCheck && p.Status == PaymentPending
+}
+
+// VerificationLabel is the payment's review state as residents and admins see it.
+func (p *Payment) VerificationLabel() string {
+	if p.NeedsCheck {
+		return "Needs check"
+	}
+	if p.Status == PaymentPending {
+		return "Pending verification"
+	}
+	return PaymentVerified
 }
 
 func NewPayment() *Payment {

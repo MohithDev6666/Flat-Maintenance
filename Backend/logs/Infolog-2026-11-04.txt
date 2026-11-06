@@ -1,0 +1,24 @@
+INFO: 2026/11/04 11:14:05 main.go:35: Connected to MongoDB
+INFO: 2026/11/04 11:14:06 main.go:64: Flat Maintenance API listening on :8080
+INFO: 2026/11/04 11:23:27 building_service_impl.go:66: Building saved successfully
+INFO: 2026/11/04 11:24:18 flats_service_impl.go:62: Flat created successfully: 2cced2cf-df59-4fef-b5ff-49e97d272538
+INFO: 2026/11/04 11:24:34 flats_service_impl.go:62: Flat created successfully: 2d36b135-853d-464e-b97d-21fae3b41968
+INFO: 2026/11/04 11:36:38 category_service_impl.go:55: Category created successfully: 8d6047b7-e425-461f-9807-5e480e36083c
+INFO: 2026/11/04 11:38:33 expenses_service_impl.go:71: Expense created successfully: 13d80486-6375-47e3-9348-d7a1c1d4b3cf
+INFO: 2026/11/04 11:41:06 owners_service_impl.go:72: Owner created successfully: 5bbd5c94-d77d-4506-9ecc-8dafea4e2f70
+INFO: 2026/11/04 11:47:09 category_service_impl.go:55: Category created successfully: 39659279-6b06-496e-8c58-1e240588b81f
+INFO: 2026/11/04 11:47:30 category_service_impl.go:79: Category updated successfully: 39659279-6b06-496e-8c58-1e240588b81f
+INFO: 2026/11/04 11:47:35 category_service_impl.go:79: Category updated successfully: 8d6047b7-e425-461f-9807-5e480e36083c
+INFO: 2026/11/04 11:47:41 category_service_impl.go:79: Category updated successfully: 39659279-6b06-496e-8c58-1e240588b81f
+INFO: 2026/11/04 11:47:47 category_service_impl.go:79: Category updated successfully: 8d6047b7-e425-461f-9807-5e480e36083c
+INFO: 2026/11/04 11:52:13 owners_service_impl.go:98: Owner updated successfully: 5bbd5c94-d77d-4506-9ecc-8dafea4e2f70
+INFO: 2026/11/04 11:52:23 owners_service_impl.go:98: Owner updated successfully: 5bbd5c94-d77d-4506-9ecc-8dafea4e2f70
+INFO: 2026/11/04 11:52:37 flats_service_impl.go:82: Flat updated successfully: 2d36b135-853d-464e-b97d-21fae3b41968
+INFO: 2026/11/04 12:01:00 monthlocks_service_impl.go:63: Month 2026-11 Locked by admin@spr.in
+INFO: 2026/11/04 12:01:27 monthlocks_service_impl.go:63: Month 2026-11 Unlocked by admin@spr.in
+INFO: 2026/11/04 12:19:25 main.go:35: Connected to MongoDB
+INFO: 2026/11/04 12:19:25 main.go:64: Flat Maintenance API listening on :8080
+INFO: 2026/11/04 15:18:15 main.go:74: Shutting down gracefully...
+INFO: 2026/11/04 15:18:15 main.go:85: Shutdown complete
+INFO: 2026/11/04 16:54:08 main.go:35: Connected to MongoDB
+INFO: 2026/11/04 16:54:09 main.go:64: Flat Maintenance API listening on :8080

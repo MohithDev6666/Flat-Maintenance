@@ -1,11 +1,14 @@
 import dayjs from 'dayjs'
 import type { Role } from '../types/models.ts'
 
+/** ₹1,500 for whole rupees; ₹1,500.50 when there are paise, so split shares show exactly. */
 export function formatINR(amount: number): string {
+  const hasPaise = Math.round(Math.abs(amount) * 100) % 100 !== 0
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
-    maximumFractionDigits: 0,
+    minimumFractionDigits: hasPaise ? 2 : 0,
+    maximumFractionDigits: hasPaise ? 2 : 0,
   }).format(amount)
 }
 

@@ -1,8 +1,7 @@
 import { Button, Card, Divider, Group, Stack, Text } from '@mantine/core'
 import type { ReactNode } from 'react'
 import { StatusBadge } from '../../components/common/StatusBadge.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
-import type { Attachment, Flat, SessionUser, Tenant } from '../../types/models.ts'
+import type { Attachment, Flat, Owner, SessionUser, Tenant } from '../../types/models.ts'
 import { activeTenantOf, flatStatus, ownerOf, tenancyState } from '../../utils/calculations.ts'
 import { formatDate, formatPhone } from '../../utils/format.ts'
 import { canSeeIdProof, canSeeOwner, canSeeOwnerPrivate, canSeeTenant } from '../../utils/permissions.ts'
@@ -13,18 +12,21 @@ import { canSeeIdProof, canSeeOwner, canSeeOwnerPrivate, canSeeTenant } from '..
  */
 export function FlatDetails({
   flat,
+  owners,
+  tenants,
   viewer,
   onViewProof,
   showHistory = false,
   bordered = false,
 }: {
   flat: Flat
+  owners: Owner[]
+  tenants: Tenant[]
   viewer: SessionUser
   onViewProof: (file: Attachment) => void
   showHistory?: boolean
   bordered?: boolean
 }) {
-  const { owners, tenants } = useBuilding()
   const owner = ownerOf(owners, flat.id)
   const tenant = activeTenantOf(tenants, flat.id)
   const status = flatStatus(flat, owners, tenants)

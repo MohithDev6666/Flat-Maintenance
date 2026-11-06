@@ -6,10 +6,12 @@ export function BuildingForm({
   initialValues,
   onSave,
   onCancel,
+  saving = false,
 }: {
   initialValues: Building
   onSave: (values: Building) => void
   onCancel: () => void
+  saving?: boolean
 }) {
   const form = useForm<Building>({
     initialValues,
@@ -33,10 +35,12 @@ export function BuildingForm({
           <TextInput label="Contact phone number" required inputMode="tel" {...form.getInputProps('contactPhone')} />
         </SimpleGrid>
         <Group justify="flex-end">
-          <Button variant="default" onClick={onCancel}>
+          <Button variant="default" onClick={onCancel} disabled={saving}>
             Cancel
           </Button>
-          <Button type="submit">Save</Button>
+          <Button type="submit" loading={saving}>
+            Save
+          </Button>
         </Group>
       </Stack>
     </form>

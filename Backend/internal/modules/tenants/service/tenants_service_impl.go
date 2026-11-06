@@ -48,6 +48,9 @@ func (ts *tenantServiceImpl) CreateTenant(ctx context.Context, actor string, ten
 	if err := ts.prepare(ctx, "", tenant); err != nil {
 		return nil, err
 	}
+	if err := ts.ensureNotOwnerOccupied(ctx, tenant.FlatID); err != nil {
+		return nil, err
+	}
 	occupancy, err := ts.occupancySnapshot(ctx, tenant.FlatID)
 	if err != nil {
 		return nil, err
@@ -77,6 +80,11 @@ func (ts *tenantServiceImpl) UpdateTenant(ctx context.Context, actor, id string,
 	}
 	if err := ts.prepare(ctx, id, tenant); err != nil {
 		return nil, err
+	}
+	if tenant.FlatID != old.FlatID {
+		if err := ts.ensureNotOwnerOccupied(ctx, tenant.FlatID); err != nil {
+			return nil, err
+		}
 	}
 	occupancy, err := ts.occupancySnapshot(ctx, old.FlatID, tenant.FlatID)
 	if err != nil {
@@ -173,6 +181,25 @@ func (ts *tenantServiceImpl) prepare(ctx context.Context, id string, tenant *mod
 	}
 	if overlaps {
 		return utils.Conflict("tenant dates overlap another tenancy for this flat")
+	}
+	return nil
+}
+
+// ensureNotOwnerOccupied refuses a tenant for a flat the owner lives in: marked Occupied with no active tenant.
+func (ts *tenantServiceImpl) ensureNotOwnerOccupied(ctx context.Context, flatID string) error {
+	flat, err := ts.flatRepo.GetFlatByID(ctx, flatID)
+	if err != nil {
+		return utils.ReferenceError(err, "flat")
+	}
+	if flat.Status != "Occupied" {
+		return nil
+	}
+	rented, err := ts.tenantRepo.HasActiveTenant(ctx, flatID, utils.Today())
+	if err != nil {
+		return err
+	}
+	if !rented {
+		return utils.Conflict("flat " + flat.Number + " is owner-occupied; mark it Available in Flats before adding a tenant")
 	}
 	return nil
 }

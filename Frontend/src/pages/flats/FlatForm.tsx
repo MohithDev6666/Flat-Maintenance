@@ -1,14 +1,13 @@
 import { Anchor, Button, Card, Group, Modal, Select, SimpleGrid, Stack, Text, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
 import { paths } from '../../routes/nav.ts'
-import type { Flat, OccupancyStatus } from '../../types/models.ts'
+import { createFlat, updateFlat } from '../../services/flatService.ts'
+import type { Flat, OccupancyStatus, Owner, Tenant } from '../../types/models.ts'
 import { activeTenantOf, ownerOf } from '../../utils/calculations.ts'
 import { formatPhone } from '../../utils/format.ts'
-import { notifyResult } from '../../utils/notify.ts'
+import { notifyError, notifyApiError, notifySuccess } from '../../utils/notify.ts'
 
 interface FlatFormValues {
   number: string
@@ -20,9 +19,27 @@ interface FlatFormValues {
  * Flats master: only the flat's own fields. Owners are assigned on the Owners master and tenants on
  * the Tenants master, so each link has exactly one place where it is changed.
  */
-export function FlatForm({ opened, flat, onClose }: { opened: boolean; flat: Flat | null; onClose: () => void }) {
-  const { user } = useAuth()
-  const { owners, tenants, flats, building, saveFlat } = useBuilding()
+export function FlatForm({
+  opened,
+  flat,
+  flats,
+  owners,
+  tenants,
+  floors,
+  onClose,
+  onSaved,
+}: {
+  opened: boolean
+  flat: Flat | null
+  flats: Flat[]
+  owners: Owner[]
+  tenants: Tenant[]
+  /** Number of floors from Building Information (0 when it is not set up yet). */
+  floors: number
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [saving, setSaving] = useState(false)
   const form = useForm<FlatFormValues>({
     initialValues: { number: '', floor: '1', status: 'Available' },
     validate: {
@@ -44,23 +61,35 @@ export function FlatForm({ opened, flat, onClose }: { opened: boolean; flat: Fla
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, flat])
 
-  if (!user) return null
-
   const owner = flat ? ownerOf(owners, flat.id) : null
   const tenant = flat ? activeTenantOf(tenants, flat.id) : null
-  const floorChoices = Array.from({ length: building.floors }, (_, index) => String(index + 1))
+  // Floors come from Building Information; keep the flat's current floor selectable even beyond that.
+  const floorCount = Math.max(floors, flat?.floor ?? 0, 1)
+  const floorChoices = Array.from({ length: floorCount }, (_, index) => String(index + 1))
 
-  const save = (values: FlatFormValues) => {
-    const done = notifyResult(
-      saveFlat({ id: flat?.id ?? null, number: values.number, floor: Number(values.floor), status: values.status }, user.name),
-      { title: flat ? 'Flat updated' : 'Flat added', message: `Flat ${values.number.trim()}` },
-    )
-    if (done) onClose()
+  const save = async (values: FlatFormValues) => {
+    if (values.status === 'Available' && tenant) {
+      notifyError('Not saved', `${tenant.name} lives in this flat. Set their move-out date on Admin → Tenants to make it Available.`)
+      return
+    }
+    const input = { number: values.number, floor: Number(values.floor), status: values.status }
+    setSaving(true)
+    try {
+      if (flat) await updateFlat(flat.id, input)
+      else await createFlat(input)
+      notifySuccess(flat ? 'Flat updated' : 'Flat added', `Flat ${values.number.trim()}`)
+      onSaved()
+      onClose()
+    } catch (failure) {
+      notifyApiError(failure)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <Modal opened={opened} onClose={onClose} title={flat ? `Edit flat ${flat.number}` : 'Add flat'} size="lg">
-      <form onSubmit={form.onSubmit(save)}>
+      <form onSubmit={form.onSubmit((values) => void save(values))}>
         <Stack gap="sm">
           <SimpleGrid cols={{ base: 1, sm: 3 }}>
             <TextInput label="Flat no" required placeholder="e.g. 501" {...form.getInputProps('number')} />
@@ -118,10 +147,12 @@ export function FlatForm({ opened, flat, onClose }: { opened: boolean; flat: Fla
           </Card>
 
           <Group justify="flex-end">
-            <Button variant="default" onClick={onClose}>
+            <Button variant="default" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit">{flat ? 'Save flat' : 'Add flat'}</Button>
+            <Button type="submit" loading={saving}>
+              {flat ? 'Save flat' : 'Add flat'}
+            </Button>
           </Group>
         </Stack>
       </form>

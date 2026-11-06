@@ -1,10 +1,9 @@
 import { Button, Group, Modal, Select, SimpleGrid, Stack, Textarea, TextInput } from '@mantine/core'
 import { useForm } from '@mantine/form'
-import { useEffect } from 'react'
-import { useAuth } from '../../hooks/useAuth.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
+import { useEffect, useState } from 'react'
+import { createCategory, updateCategory } from '../../services/categoryService.ts'
 import type { CategoryTag, ExpenseCategory, RecordStatus } from '../../types/models.ts'
-import { notifyResult } from '../../utils/notify.ts'
+import { notifyApiError, notifySuccess } from '../../utils/notify.ts'
 
 interface CategoryFormValues {
   name: string
@@ -15,34 +14,63 @@ interface CategoryFormValues {
 
 const empty: CategoryFormValues = { name: '', description: '', defaultTag: 'Tenant', status: 'Active' }
 
-export function CategoryForm({ opened, category, onClose }: { opened: boolean; category: ExpenseCategory | null; onClose: () => void }) {
-  const { user } = useAuth()
-  const { saveCategory } = useBuilding()
+export function CategoryForm({
+  opened,
+  category,
+  categories,
+  onClose,
+  onSaved,
+}: {
+  opened: boolean
+  category: ExpenseCategory | null
+  /** Existing categories, to catch a duplicate name before calling the API. */
+  categories: ExpenseCategory[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [saving, setSaving] = useState(false)
   const form = useForm<CategoryFormValues>({
     initialValues: empty,
-    validate: { name: (value) => (value.trim() ? null : 'Enter a category name') },
+    validate: {
+      name: (value) => {
+        const name = value.trim()
+        if (!name) return 'Enter a category name'
+        const taken = categories.some((item) => item.name.toLowerCase() === name.toLowerCase() && item.id !== category?.id)
+        return taken ? 'That category already exists' : null
+      },
+    },
   })
 
   useEffect(() => {
     if (!opened) return
-    form.setValues(category ? { ...category } : empty)
+    form.setValues(
+      category
+        ? { name: category.name, description: category.description, defaultTag: category.defaultTag, status: category.status }
+        : empty,
+    )
     form.resetDirty()
+    form.clearErrors()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened, category])
 
-  if (!user) return null
-
-  const save = (values: CategoryFormValues) => {
-    const done = notifyResult(saveCategory({ ...values, id: category?.id ?? `cat-${crypto.randomUUID()}` }, user.name), {
-      title: category ? 'Category updated' : 'Category added',
-      message: values.name.trim(),
-    })
-    if (done) onClose()
+  const save = async (values: CategoryFormValues) => {
+    setSaving(true)
+    try {
+      if (category) await updateCategory(category.id, values)
+      else await createCategory(values)
+      notifySuccess(category ? 'Category updated' : 'Category added', values.name.trim())
+      onSaved()
+      onClose()
+    } catch (failure) {
+      notifyApiError(failure)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <Modal opened={opened} onClose={onClose} title={category ? 'Edit category' : 'Add category'}>
-      <form onSubmit={form.onSubmit(save)}>
+      <form onSubmit={form.onSubmit((values) => void save(values))}>
         <Stack gap="sm">
           <TextInput label="Category name" required {...form.getInputProps('name')} />
           <Textarea label="Description" autosize minRows={2} {...form.getInputProps('description')} />
@@ -65,10 +93,12 @@ export function CategoryForm({ opened, category, onClose }: { opened: boolean; c
             />
           </SimpleGrid>
           <Group justify="flex-end">
-            <Button variant="default" onClick={onClose}>
+            <Button variant="default" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit">Save category</Button>
+            <Button type="submit" loading={saving}>
+              Save category
+            </Button>
           </Group>
         </Stack>
       </form>

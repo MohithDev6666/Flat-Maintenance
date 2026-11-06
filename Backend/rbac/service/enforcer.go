@@ -212,7 +212,9 @@ func (e *enforcer) buildModMap(ctx context.Context) (map[string]string, error) {
 	}
 	m := make(map[string]string, len(mods))
 	for _, mod := range mods {
-		m[mod.Key] = mod.ID
+		// checkPermissionWithMap lowercases the requested module key, so index by the
+		// lowercased key; otherwise camelCase modules (e.g. flatManagement) never match.
+		m[strings.ToLower(mod.Key)] = mod.ID
 	}
 	return m, nil
 }

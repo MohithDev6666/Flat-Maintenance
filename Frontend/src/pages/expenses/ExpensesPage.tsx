@@ -1,29 +1,65 @@
 import { Badge, Box, Button, Card, Divider, Group, SegmentedControl, Select, SimpleGrid, Stack, Table, Text } from '@mantine/core'
 import { IconPlus } from '@tabler/icons-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EmptyState } from '../../components/common/EmptyState.tsx'
 import { FilePreview } from '../../components/common/FilePreview.tsx'
+import { LoadState } from '../../components/common/LoadState.tsx'
 import { StatusBadge } from '../../components/common/StatusBadge.tsx'
 import { ExpenseDetails } from '../../components/expenses/ExpenseDetails.tsx'
 import { ExpenseRow } from '../../components/expenses/ExpenseRow.tsx'
 import { PageHeading } from '../../components/ui/PageHeading.tsx'
-import { useBuilding } from '../../hooks/useBuilding.tsx'
 import { usePermissions } from '../../hooks/usePermissions.ts'
-import { calendar } from '../../mocks/calendar.ts'
 import { paths } from '../../routes/nav.ts'
-import type { Attachment, Expense, Responsibility } from '../../types/models.ts'
+import { getErrorMessage } from '../../services/apiClient.ts'
+import { getCategories } from '../../services/categoryService.ts'
+import { getExpenses } from '../../services/expenseService.ts'
+import { getFlats } from '../../services/flatService.ts'
+import { getMonthLocks, lockChecker } from '../../services/monthLockService.ts'
+import type { Attachment, Expense, ExpenseCategory, MonthLock, Responsibility } from '../../types/models.ts'
+import { calendar } from '../../utils/calendar.ts'
 import { listMonths, monthOf, sortExpenses } from '../../utils/calculations.ts'
 import { formatDate, formatINR, formatMonth } from '../../utils/format.ts'
 
 export function ExpensesPage() {
-  const { expenses, categories, isLocked } = useBuilding()
   const { can } = usePermissions()
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [categories, setCategories] = useState<ExpenseCategory[]>([])
+  const [monthLocks, setMonthLocks] = useState<MonthLock[]>([])
+  const [flatCount, setFlatCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [month, setMonth] = useState<string | null>(calendar.currentMonth)
   const [category, setCategory] = useState<string | null>('all')
   const [tag, setTag] = useState<'all' | Responsibility>('all')
   const [openedExpense, setOpenedExpense] = useState<Expense | null>(null)
   const [bill, setBill] = useState<Attachment | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const [expenseList, categoryList, lockList, flats] = await Promise.all([
+        getExpenses(),
+        getCategories(),
+        getMonthLocks(),
+        getFlats().catch(() => []),
+      ])
+      setExpenses(expenseList)
+      setCategories(categoryList)
+      setMonthLocks(lockList)
+      setFlatCount(flats.length)
+      setError(null)
+    } catch (failure) {
+      setError(getErrorMessage(failure))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const isLocked = useMemo(() => lockChecker(monthLocks), [monthLocks])
 
   const monthOptions = useMemo(
     () => [
@@ -94,6 +130,7 @@ export function ExpensesPage() {
         ) : null}
       </Card>
 
+      <LoadState loading={loading} error={error} onRetry={load}>
       <Card p={visible.length === 0 ? undefined : 0}>
         {visible.length === 0 ? (
           <EmptyState
@@ -189,8 +226,17 @@ export function ExpensesPage() {
           </Group>
         ) : null}
       </Card>
+      </LoadState>
 
-      <ExpenseDetails expense={openedExpense} opened={openedExpense !== null} onClose={() => setOpenedExpense(null)} />
+      <ExpenseDetails
+        expense={openedExpense}
+        opened={openedExpense !== null}
+        onClose={() => setOpenedExpense(null)}
+        categories={categories}
+        isLocked={isLocked}
+        flatCount={flatCount}
+        onChanged={() => void load()}
+      />
       <FilePreview file={bill} title="Bill" note="Every signed-in resident can open a bill." onClose={() => setBill(null)} />
     </Stack>
   )

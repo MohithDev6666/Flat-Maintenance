@@ -9,4 +9,5 @@ func SetupReportRoutes(router *gin.RouterGroup, handler handler.ReportHandler, r
 	router.GET("/dashboard", require("dashboard:view"), handler.GetDashboardHandler)
 	router.GET("/summary", require("summary:view"), handler.GetSummaryHandler)
 	router.GET("/contribution", require("contribution:view"), handler.GetContributionHandler)
+	router.GET("/pay-status", require("payments:view"), handler.GetPayStatusHandler)
 }

@@ -1,0 +1,1 @@
+ERROR: 2026/11/04 16:54:09 main.go:66: HTTP server failed: listen tcp :8080: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
