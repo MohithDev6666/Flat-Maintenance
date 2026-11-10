@@ -16,6 +16,21 @@ Copy-Item .env.example .env
 go run ./cmd/server
 ```
 
+## Run with Docker Compose
+
+From the repository root, make sure `Backend/.env` contains your backend
+configuration, then start the frontend and API:
+
+```sh
+docker compose up --build
+```
+
+Open <http://localhost:3000>. Compose loads backend settings from
+`Backend/.env` and does not start MongoDB; configure `MONGODB_URI` there to
+point to the MongoDB instance you already run, using an address reachable from
+the backend container. Nginx forwards `/api` requests to the backend. Stop the
+containers with `docker compose down`.
+
 The server reads `.env` from the process working directory. Existing process
 environment values take precedence. Required values are:
 

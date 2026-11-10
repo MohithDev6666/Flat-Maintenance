@@ -1,0 +1,22 @@
+services:
+  backend:
+    image: flat-maintenance-backend:1.0.0
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./Backend/.env
+    expose:
+      - "8080"
+
+  frontend:
+    image: flat-maintenance-frontend:1.0.0
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
